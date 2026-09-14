@@ -1,0 +1,140 @@
+<script>
+/* ---------- ตัวช่วยฝั่งหน้าเว็บ (ใช้ร่วมกันทุกหน้า) ---------- */
+
+function api(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(function (e) { reject(new Error(e && e.message ? e.message : String(e))); })
+      [fn].apply(null, args);
+  });
+}
+
+function $(sel, root) { return (root || document).querySelector(sel); }
+function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function baht(v) {
+  var n = Number(String(v === '' || v === null || v === undefined ? 0 : v).replace(/[, ฿]/g, '')) || 0;
+  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ฿';
+}
+function numOf(v) { return Number(String(v === '' || v === null || v === undefined ? 0 : v).replace(/[, ฿]/g, '')) || 0; }
+
+var toastTimer = null;
+function toast(msg, kind) {
+  var t = $('#toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
+  t.className = 'toast ' + (kind || '');
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.style.display = 'none'; }, kind === 'err' ? 6000 : 3200);
+}
+
+function busy(btn, on, textWhenBusy) {
+  if (!btn) return;
+  if (on) {
+    btn.dataset.old = btn.innerHTML;
+    btn.innerHTML = '<span class="spin"></span> ' + (textWhenBusy || 'กำลังบันทึก...');
+    btn.disabled = true;
+  } else {
+    if (btn.dataset.old) btn.innerHTML = btn.dataset.old;
+    btn.disabled = false;
+  }
+}
+
+/* ---------- รูปภาพ ---------- */
+/* เก็บใน Drive เป็น file id ส่วนลิงก์ภายนอกเก็บเป็น http... */
+function photoSrc(v, size) {
+  if (!v) return '';
+  if (/^https?:\/\//i.test(v)) return v;
+  return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(v) + '&sz=w' + (size || 900);
+}
+function photoOpen(v) {
+  if (!v) return '#';
+  if (/^https?:\/\//i.test(v)) return v;
+  return 'https://drive.google.com/file/d/' + encodeURIComponent(v) + '/view';
+}
+function zoom(v) {
+  var lb = $('#lightbox');
+  $('#lb-img').src = photoSrc(v, 1600);
+  $('#lb-open').href = photoOpen(v);
+  lb.style.display = 'flex';
+}
+function zoomClose() { $('#lightbox').style.display = 'none'; $('#lb-img').src = ''; }
+
+function imgTag(v, cls, alt) {
+  if (!v) return '';
+  return '<img class="' + (cls || 'thumb') + '" loading="lazy" alt="' + esc(alt || 'photo') + '" src="' +
+    esc(photoSrc(v, cls === 'photo-big' ? 1200 : 300)) + '" onclick="zoom(\'' + esc(v) + '\')" ' +
+    'onerror="this.style.opacity=.35;this.alt=\'เปิดรูปไม่ได้ ตรวจสิทธิ์ Drive\'">';
+}
+
+/* ---------- ย่อรูปก่อนอัปโหลด (สำคัญมากบนมือถือ) ---------- */
+function readFileForUpload(file, maxPx, quality) {
+  return new Promise(function (resolve, reject) {
+    if (!file) return reject(new Error('ไม่พบไฟล์'));
+    if (file.size > 25 * 1024 * 1024) return reject(new Error('ไฟล์ใหญ่เกินไป (เกิน 25MB)'));
+    if (!/^image\//.test(file.type)) {
+      var fr = new FileReader();
+      fr.onload = function () {
+        resolve({ name: file.name, mime: file.type || 'application/octet-stream', dataB64: String(fr.result).split(',')[1] });
+      };
+      fr.onerror = function () { reject(new Error('อ่านไฟล์ไม่สำเร็จ')); };
+      fr.readAsDataURL(file);
+      return;
+    }
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function () {
+      var max = maxPx || 1400;
+      var scale = Math.min(1, max / Math.max(img.width, img.height));
+      var c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * scale));
+      c.height = Math.max(1, Math.round(img.height * scale));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      var data = c.toDataURL('image/jpeg', quality || 0.82);
+      URL.revokeObjectURL(url);
+      resolve({
+        name: String(file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg',
+        mime: 'image/jpeg',
+        dataB64: data.split(',')[1]
+      });
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('อ่านรูปไม่สำเร็จ')); };
+    img.src = url;
+  });
+}
+
+function copyText(text) {
+  return new Promise(function (resolve) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select(); ta.setSelectionRange(0, 999999);
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    if (ok) return resolve(true);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(function () { resolve(true); }, function () { resolve(false); });
+    } else resolve(false);
+  });
+}
+
+function fmtDT(s) { return String(s || '').replace(/:\d\d$/, ''); }
+function todayStr() {
+  var d = new Date();
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+}
+function lsGet(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { } }
+</script>

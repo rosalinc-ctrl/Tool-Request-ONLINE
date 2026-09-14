@@ -1,0 +1,358 @@
+<!-- หน้าติดตาม/ยืนยันของช่าง (เข้าด้วยลิงก์ token) -->
+<?!= include('Style'); ?>
+<header class="top">
+  <div class="t" id="h_title">🔧 กำลังโหลด...</div>
+  <div class="s" id="h_sub"></div>
+</header>
+
+<div class="wrap">
+  <div class="card" style="position:sticky;top:52px;z-index:15">
+    <label class="req" style="margin-top:0">ฉันคือ <span class="en">/ I am (ผู้กดยืนยัน)</span></label>
+    <input id="me" list="techlist" placeholder="เลือกหรือพิมพ์ชื่อของคุณ" autocomplete="off">
+    <datalist id="techlist"></datalist>
+    <div class="muted small">ระบบจะบันทึกชื่อและเวลาที่กดทุกครั้ง</div>
+  </div>
+
+  <div class="banner warnb">
+    <b>การยืนยันสเปค ≠ การอนุมัติสั่งซื้อ</b><br>
+    <span class="small">เมื่อช่างยืนยันแล้ว ฝ่ายจัดซื้อจะต้องอนุมัติอีกขั้นหนึ่งก่อนสั่งซื้อจริง / Technical confirmation is not a purchase authorization.</span>
+  </div>
+
+  <div id="list"></div>
+  <div style="height:10px"></div>
+  <div class="card">
+    <button class="btn" onclick="load(true)">🔄 รีเฟรชสถานะ</button>
+  </div>
+</div>
+
+<div id="lightbox" onclick="zoomClose()">
+  <img id="lb-img" src="" alt="">
+  <div class="lb-bar"><a id="lb-open" href="#" target="_blank" rel="noopener" onclick="event.stopPropagation()">เปิดไฟล์ต้นฉบับ</a><span>แตะเพื่อปิด</span></div>
+</div>
+
+<?!= include('ClientLib'); ?>
+<script>
+var BOOT = <?!= jsonFor_(DATA) ?>;
+var TOKEN = BOOT.token;
+var DTO = null;
+
+var STAGE_CLASS = {
+  NEED_OPTION: 'y', TECH_SPEC: 'b', TECH_MODE: 'b', APPROVAL: 'y',
+  TO_ORDER: 'g', ORDERED: 'g', LOCAL_BUY: 'y', DONE: 'g', PUR_REJECTED: 'r', CANCELLED: 'r'
+};
+
+function me() { return $('#me').value.trim(); }
+function needMe() {
+  if (!me()) { toast('กรุณาเลือก/พิมพ์ชื่อของคุณก่อน', 'err'); $('#me').focus(); return true; }
+  lsSet('tech_name', me());
+  return false;
+}
+
+function load(showToast) {
+  api('apiGetRequest', TOKEN).then(function (d) {
+    DTO = d;
+    render();
+    if (showToast) toast('อัปเดตแล้ว', 'ok');
+  }).catch(function (e) { toast(e.message, 'err'); });
+}
+
+function render() {
+  var r = DTO.request;
+  $('#h_title').textContent = '🔧 ' + r.req_id + ' — ' + r.requester_name;
+  $('#h_sub').textContent = 'ต้องการใช้ ' + (r.required_date || '-') + ' • ส่งเมื่อ ' + fmtDT(r.created_at) +
+    ' • ' + DTO.items.length + ' รายการ';
+  $('#techlist').innerHTML = (DTO.technicians || []).map(function (t) {
+    return '<option value="' + esc(t.name) + '">';
+  }).join('');
+  if (!$('#me').value) $('#me').value = lsGet('tech_name', '') || r.requester_name || '';
+  $('#list').innerHTML = DTO.items.map(itemCard).join('');
+}
+
+function itemCard(it) {
+  var h = [];
+  h.push('<div class="card" id="card_' + it.item_id + '">');
+  h.push('<div class="item-head"><div><h3 style="margin:0"><span class="num">' + it.seq + '</span>' +
+    esc(it.tool_name) + '</h3><div class="muted small">' + esc(it.item_id) + ' • จำนวน ' +
+    esc(it.qty) + ' ' + esc(it.unit) + '</div></div>' +
+    '<span class="chip ' + (STAGE_CLASS[it.stage] || '') + '">' + esc(it.stageLabel.split(' / ')[0]) + '</span></div>');
+
+  // สิ่งที่ช่างขอ
+  h.push('<details><summary>ดูสิ่งที่ขอไว้ / What you asked</summary><div style="padding-top:4px">');
+  if (it.intended_use) h.push(kv('ใช้ทำอะไร', it.intended_use));
+  if (it.spec_pref) h.push(kv('สเปค/ยี่ห้อ', it.spec_pref));
+  if (numOf(it.benchmark_price)) h.push(kv('ราคาที่ร้าน', baht(it.benchmark_price) + ' (' + esc(it.benchmark_store || '-') + ')'));
+  if (it.ref_links) h.push(kv('ลิงก์', '<a href="' + esc(it.ref_links) + '" target="_blank" rel="noopener">เปิดลิงก์</a>'));
+  if (it.photos && it.photos.length) {
+    h.push('<div class="thumbs">' + it.photos.map(function (p) { return imgTag(p, 'thumb', 'รูปอ้างอิง'); }).join('') + '</div>');
+  }
+  h.push('</div></details>');
+
+  if (it.pur_note) h.push('<div class="banner info"><b>ข้อความจากจัดซื้อ:</b> ' + esc(it.pur_note) + '</div>');
+
+  // ตัวเลือกจากจัดซื้อ
+  if (it.options.length) {
+    h.push('<div class="sec-title" style="margin-top:12px">ตัวเลือกจากจัดซื้อ / Options (' + it.options.length + ')</div>');
+    h.push(it.options.map(function (o) { return optionCard(it, o); }).join(''));
+  } else {
+    h.push('<div class="banner info">ยังไม่มีตัวเลือกจากจัดซื้อ — รอฝ่ายจัดซื้อหาของและเสนอราคา</div>');
+  }
+
+  h.push(actionArea(it));
+
+  if (it.history && it.history.length) {
+    h.push('<details><summary>ประวัติการตัดสินใจ (' + it.history.length + ') / History</summary>' +
+      it.history.slice().reverse().map(function (x) {
+        return '<div class="hist"><b>' + fmtDT(x.ts) + '</b> — ' + esc(x.actor) + ' (' + esc(x.role) + ')<br>' +
+          esc(actionLabel(x.action)) + (x.detail ? (': ' + esc(x.detail)) : '') + '</div>';
+      }).join('') + '</details>');
+  }
+  h.push('</div>');
+  return h.join('');
+}
+
+function kv(k, v) { return '<div class="kv"><b>' + esc(k) + '</b><span>' + v + '</span></div>'; }
+
+function optionCard(it, o) {
+  var cls = 'opt' + (String(it.chosen_option_id) === String(o.option_id) ? ' chosen' : '') +
+    (o.status === 'REJECTED' ? ' rej' : '');
+  var h = [];
+  h.push('<div class="' + cls + '" id="opt_' + o.option_id + '">');
+  if (o.photo_url) h.push(imgTag(o.photo_url, 'photo-big', o.brand_model));
+  h.push('<div style="margin-top:8px"><b>' + esc(o.brand_model) + '</b>' +
+    (o.is_recommended === 'Y' ? ' <span class="chip g">จัดซื้อแนะนำ</span>' : '') +
+    (String(it.chosen_option_id) === String(o.option_id) ? ' <span class="chip g">✔ ยืนยันแล้ว</span>' : '') +
+    (o.status === 'REJECTED' ? ' <span class="chip r">ไม่ตรงสเปค</span>' : '') +
+    (o.status === 'CHANGE_REQUESTED' ? ' <span class="chip y">ขอแก้ไข</span>' : '') +
+    '</div>');
+  if (o.spec) h.push('<div class="small" style="white-space:pre-wrap;margin:4px 0">' + esc(o.spec) + '</div>');
+
+  h.push('<div class="price">' + baht(o.total_cost) + ' <span class="small muted">รวมทั้งหมด</span></div>');
+  h.push('<details><summary>ดูรายละเอียดราคา / Price breakdown</summary>');
+  h.push(kv('ราคา/หน่วย', baht(o.unit_price) + ' × ' + esc(it.qty) + ' = ' + baht(o.subtotal)));
+  h.push(kv('ค่าส่ง', baht(o.shipping)));
+  h.push(kv('VAT ' + esc(o.vat_rate) + '%', baht(o.vat_amount)));
+  h.push(kv('รวมสุทธิ', '<b>' + baht(o.total_cost) + '</b>'));
+  h.push('</details>');
+
+  h.push(kv('ผู้ขาย', esc(o.supplier)));
+  h.push(kv('พร้อมส่ง', esc(o.availability || '-') + (o.delivery_date ? (' • ได้ของ ' + esc(o.delivery_date)) : '')));
+  h.push(kv('เงื่อนไขชำระ', esc(o.payment_terms || '-')));
+  if (o.note) h.push(kv('หมายเหตุ', esc(o.note)));
+  if (o.product_link) h.push('<div style="margin-top:6px"><a class="btn btn-sm" href="' + esc(o.product_link) + '" target="_blank" rel="noopener">🔗 เปิดลิงก์สินค้า</a></div>');
+
+  var bench = numOf(it.benchmark_price);
+  if (bench) {
+    var diff = numOf(o.total_cost) - bench * numOf(it.qty);
+    h.push('<div class="banner ' + (diff > 0 ? 'warnb' : 'okb') + '" style="margin-top:8px">' +
+      'เทียบราคาที่ร้าน (' + esc(it.benchmark_store || 'ร้าน') + '): ' +
+      (diff > 0 ? 'แพงกว่า ' : 'ถูกกว่า ') + baht(Math.abs(diff)) + '</div>');
+  }
+
+  if (it.stage === 'TECH_SPEC') {
+    h.push('<div class="btn-row">' +
+      '<button class="btn btn-ok" onclick="confirmOpt(\'' + it.item_id + '\',\'' + o.option_id + '\',this)">✅ ตรงสเปค ยืนยัน</button>' +
+      '<button class="btn btn-danger" onclick="askReason(\'' + it.item_id + '\',\'' + o.option_id + '\',\'REJECT\')">❌ ไม่ตรงสเปค</button>' +
+      '<button class="btn btn-warn" onclick="askReason(\'' + it.item_id + '\',\'' + o.option_id + '\',\'CHANGE\')">✏️ ขอให้แก้ไข</button>' +
+      '</div>');
+  }
+  h.push('<div class="reasonbox" id="rb_' + o.option_id + '"></div>');
+  h.push('</div>');
+  return h.join('');
+}
+
+function actionArea(it) {
+  var st = it.stage;
+  var h = [];
+
+  if (st === 'NEED_OPTION') {
+    h.push('<div class="btn-row"><button class="btn btn-warn" onclick="showLocalForm(\'' + it.item_id + '\')">🏪 ขอซื้อเองที่ร้าน (Local buy)</button></div>');
+    h.push('<div class="localbox" id="lb_' + it.item_id + '"></div>');
+  }
+
+  if (st === 'TECH_MODE') {
+    var o = it.options.filter(function (x) { return String(x.option_id) === String(it.chosen_option_id); })[0];
+    h.push('<div class="sec-title">เลือกวิธีซื้อ / Choose how to buy</div>');
+    h.push('<table class="cmp"><tr><th></th><th>จัดซื้อสั่งซื้อ<br><span class="small muted">Purchasing buys</span></th></tr>' +
+      '<tr><th>สินค้า</th><td>' + esc(o ? o.brand_model : '-') + '</td></tr>' +
+      '<tr><th>ราคารวม</th><td><b>' + baht(o ? o.total_cost : 0) + '</b><br><span class="small muted">รวม VAT + ค่าส่ง</span></td></tr>' +
+      '<tr><th>ได้ของ</th><td>' + esc(o ? (o.delivery_date || o.availability || '-') : '-') + '</td></tr>' +
+      '<tr><th>ใบกำกับภาษี</th><td>ผู้ขายออกให้บริษัทโดยตรง</td></tr>' +
+      '</table>');
+    if (numOf(it.benchmark_price)) {
+      var localTotal = numOf(it.benchmark_price) * numOf(it.qty);
+      var d = numOf(o ? o.total_cost : 0) - localTotal;
+      h.push('<div class="banner info" style="margin-top:8px">ถ้าซื้อเองที่ ' + esc(it.benchmark_store || 'ร้าน') +
+        ' ราคาประมาณ <b>' + baht(localTotal) + '</b> — ' +
+        (d > 0 ? ('ถูกกว่าจัดซื้อ ' + baht(d) + ' และได้ของวันนี้') : ('แพงกว่าจัดซื้อ ' + baht(Math.abs(d)))) + '</div>');
+    }
+    h.push('<div class="btn-row">' +
+      '<button class="btn btn-primary" onclick="chooseSupplier(\'' + it.item_id + '\',this)">🚚 ให้จัดซื้อสั่งซื้อ</button>' +
+      '<button class="btn btn-warn" onclick="showLocalForm(\'' + it.item_id + '\')">🏪 ซื้อเองที่ร้าน</button>' +
+      '</div>');
+    h.push('<div class="localbox" id="lb_' + it.item_id + '"></div>');
+  }
+
+  if (st === 'APPROVAL') {
+    h.push('<div class="banner warnb"><b>รอฝ่ายจัดซื้ออนุมัติ</b><br><span class="small">' +
+      esc(it.fulfil_mode === 'LOCAL' ? ('ช่างซื้อเองที่ ' + (it.local_store || '-') + ' ราคาประเมิน ' + baht(it.local_est_price)) : 'จัดซื้อสั่งซื้อจากผู้ขาย') +
+      ' • ตัดสินใจโดย ' + esc(it.decided_by) + ' เมื่อ ' + fmtDT(it.decided_at) + '</span></div>');
+  }
+
+  if (st === 'TO_ORDER' || st === 'ORDERED') {
+    h.push('<div class="banner okb"><b>' + (st === 'ORDERED' ? 'จัดซื้อสั่งซื้อแล้ว รอของ' : 'อนุมัติแล้ว จัดซื้อกำลังดำเนินการ') + '</b>' +
+      (it.po_ref ? ('<br><span class="small">อ้างอิง: ' + esc(it.po_ref) + '</span>') : '') + '</div>');
+  }
+
+  if (st === 'LOCAL_BUY') {
+    var c = (DTO.config && DTO.config.company) || {};
+    h.push('<div class="banner okb"><b>อนุมัติให้ซื้อเองที่ร้านแล้ว</b><br><span class="small">ร้าน ' +
+      esc(it.local_store || '-') + ' • ราคาประเมิน ' + baht(it.local_est_price) +
+      (it.po_ref ? (' • อ้างอิง ' + esc(it.po_ref)) : '') + '</span></div>');
+    h.push('<details open><summary>🧾 ข้อมูลออกใบกำกับภาษีในนามบริษัท</summary>' +
+      kv('ชื่อบริษัท', esc(c.name)) + kv('เลขผู้เสียภาษี', esc(c.taxId)) +
+      kv('สาขา', esc(c.branch)) + kv('ที่อยู่', esc(c.address)) +
+      '<div class="btn-row"><button class="btn btn-sm" onclick="copyTax()">📋 คัดลอกข้อมูลบริษัท</button></div></details>');
+    h.push('<div class="sec-title">อัปโหลดใบเสร็จ/ใบกำกับภาษี</div>' +
+      '<label>ราคาจริงที่จ่าย <span class="en">/ Actual price (ไม่บังคับ)</span></label>' +
+      '<input id="ap_' + it.item_id + '" type="number" inputmode="decimal" step="0.01" placeholder="' + numOf(it.local_est_price) + '">' +
+      '<label>ไฟล์ใบเสร็จ (รูปหรือ PDF)</label>' +
+      '<input id="rc_' + it.item_id + '" type="file" accept="image/*,application/pdf">' +
+      '<div class="btn-row"><button class="btn btn-primary" onclick="upReceipt(\'' + it.item_id + '\',this)">📤 ส่งใบเสร็จ</button></div>');
+  }
+
+  if (st === 'DONE') {
+    h.push('<div class="banner okb"><b>เสร็จสิ้น</b>' +
+      (it.receipt_url ? (' — <a href="' + esc(it.receipt_url) + '" target="_blank" rel="noopener">ดูใบเสร็จ</a>') : '') + '</div>');
+  }
+  if (st === 'PUR_REJECTED') {
+    h.push('<div class="banner err"><b>จัดซื้อไม่อนุมัติ</b><br><span class="small">' + esc(it.approval_note || '-') + '</span></div>');
+  }
+  if (st === 'CANCELLED') h.push('<div class="banner err">ยกเลิกรายการนี้แล้ว</div>');
+
+  return h.join('');
+}
+
+/* ---------- actions ---------- */
+
+function askReason(itemId, optionId, kind) {
+  var box = $('#rb_' + optionId);
+  box.innerHTML =
+    '<label style="margin-top:10px">' + (kind === 'REJECT' ? 'ไม่ตรงสเปคเพราะอะไร' : 'ต้องการให้แก้ไขอะไร') + ' <span class="en">*</span></label>' +
+    '<textarea id="rt_' + optionId + '" placeholder="' + (kind === 'REJECT' ? 'เช่น กำลังไฟน้อยไป ต้องการ 800W ขึ้นไป' : 'เช่น ขอรุ่นที่มีกล่องและดอกสว่านมาด้วย') + '"></textarea>' +
+    '<div class="btn-row">' +
+    '<button class="btn ' + (kind === 'REJECT' ? 'btn-danger' : 'btn-warn') + '" onclick="sendReason(\'' + itemId + '\',\'' + optionId + '\',\'' + kind + '\',this)">ส่ง</button>' +
+    '<button class="btn btn-sm" onclick="document.getElementById(\'rb_' + optionId + '\').innerHTML=\'\'">ยกเลิก</button></div>';
+  $('#rt_' + optionId).focus();
+}
+
+function sendReason(itemId, optionId, kind, btn) {
+  if (needMe()) return;
+  var note = $('#rt_' + optionId).value.trim();
+  if (!note) { toast('กรุณาระบุเหตุผล', 'err'); return; }
+  busy(btn, true, 'กำลังส่ง...');
+  api('apiTechDecision', TOKEN, itemId, kind, { by: me(), note: note, option_id: optionId })
+    .then(after(btn, 'บันทึกแล้ว แจ้งจัดซื้อเรียบร้อย'))
+    .catch(fail(btn));
+}
+
+function confirmOpt(itemId, optionId, btn) {
+  if (needMe()) return;
+  busy(btn, true, 'กำลังยืนยัน...');
+  api('apiTechDecision', TOKEN, itemId, 'CONFIRM', { by: me(), option_id: optionId })
+    .then(after(btn, 'ยืนยันสเปคแล้ว — ขั้นต่อไปเลือกวิธีซื้อ'))
+    .catch(fail(btn));
+}
+
+function chooseSupplier(itemId, btn) {
+  if (needMe()) return;
+  busy(btn, true, 'กำลังส่ง...');
+  api('apiChooseMode', TOKEN, itemId, 'SUPPLIER', { by: me() })
+    .then(after(btn, 'ส่งให้จัดซื้อพิจารณาอนุมัติแล้ว'))
+    .catch(fail(btn));
+}
+
+function showLocalForm(itemId) {
+  var it = DTO.items.filter(function (x) { return x.item_id === itemId; })[0];
+  var c = (DTO.config && DTO.config.company) || {};
+  var box = $('#lb_' + itemId);
+  box.innerHTML =
+    '<div class="card" style="background:#fffdf7">' +
+    '<h3>ซื้อเองที่ร้าน / Buy locally</h3>' +
+    '<label class="req">ราคาประเมินต่อหน่วย <span class="en">/ Estimated unit price</span></label>' +
+    '<input id="lp_' + itemId + '" type="number" inputmode="decimal" step="0.01" value="' + (numOf(it.benchmark_price) || '') + '">' +
+    '<label class="req">ร้านที่จะไปซื้อ <span class="en">/ Store</span></label>' +
+    '<input id="ls_' + itemId + '" value="' + esc(it.benchmark_store || (DTO.config.benchmarkStore || '')) + '">' +
+    '<div class="banner warnb" style="margin-top:10px"><b>ต้องขอใบกำกับภาษี/ใบเสร็จในนามบริษัทเท่านั้น</b>' +
+    '<div class="small" style="margin-top:6px">' + esc(c.name) + '<br>เลขผู้เสียภาษี: ' + esc(c.taxId) +
+    '<br>สาขา: ' + esc(c.branch) + '<br>ที่อยู่: ' + esc(c.address) + '</div>' +
+    '<div class="btn-row"><button class="btn btn-sm" onclick="copyTax()">📋 คัดลอกข้อมูลบริษัท</button></div></div>' +
+    '<label style="display:flex;gap:8px;align-items:flex-start;font-size:14.5px;color:var(--text)">' +
+    '<input type="checkbox" id="lt_' + itemId + '" style="width:22px;height:22px;flex:0 0 auto;margin-top:2px">' +
+    '<span>ยืนยันว่าร้านนี้ออกใบกำกับภาษี/ใบเสร็จในนามบริษัทได้ <span class="en">/ Tax invoice available</span></span></label>' +
+    '<div class="btn-row">' +
+    '<button class="btn btn-primary" onclick="chooseLocal(\'' + itemId + '\',this)">ส่งให้จัดซื้ออนุมัติ</button>' +
+    '<button class="btn btn-sm" onclick="document.getElementById(\'lb_' + itemId + '\').innerHTML=\'\'">ยกเลิก</button>' +
+    '</div></div>';
+}
+
+function chooseLocal(itemId, btn) {
+  if (needMe()) return;
+  var price = numOf($('#lp_' + itemId).value);
+  var store = $('#ls_' + itemId).value.trim();
+  var ok = $('#lt_' + itemId).checked;
+  if (!price) { toast('กรุณาระบุราคาประเมิน', 'err'); return; }
+  if (!store) { toast('กรุณาระบุชื่อร้าน', 'err'); return; }
+  if (!ok) { toast('ต้องยืนยันว่าขอใบกำกับภาษีในนามบริษัทได้', 'err'); return; }
+  busy(btn, true, 'กำลังส่ง...');
+  api('apiChooseMode', TOKEN, itemId, 'LOCAL', {
+    by: me(), local_est_price: price, local_store: store, tax_invoice_ok: true
+  }).then(after(btn, 'ส่งให้จัดซื้ออนุมัติแล้ว — รออนุมัติก่อนไปซื้อ')).catch(fail(btn));
+}
+
+function upReceipt(itemId, btn) {
+  if (needMe()) return;
+  var input = $('#rc_' + itemId);
+  var f = input.files && input.files[0];
+  if (!f) { toast('กรุณาเลือกไฟล์ใบเสร็จ', 'err'); return; }
+  var actual = numOf($('#ap_' + itemId).value);
+  busy(btn, true, 'กำลังอัปโหลด...');
+  readFileForUpload(f, 1800, 0.85).then(function (file) {
+    return api('apiUploadReceipt', TOKEN, itemId, file, me(), actual);
+  }).then(after(btn, 'ส่งใบเสร็จเรียบร้อย')).catch(fail(btn));
+}
+
+function copyTax() {
+  var c = (DTO.config && DTO.config.company) || {};
+  copyText([c.name, 'เลขประจำตัวผู้เสียภาษี: ' + c.taxId, 'สาขา: ' + c.branch, 'ที่อยู่: ' + c.address].join('\n'))
+    .then(function (ok) { toast(ok ? 'คัดลอกข้อมูลบริษัทแล้ว' : 'คัดลอกไม่สำเร็จ', ok ? 'ok' : 'err'); });
+}
+
+function after(btn, msg) {
+  return function (dto) {
+    busy(btn, false);
+    DTO = dto;
+    render();
+    toast(msg, 'ok');
+  };
+}
+function fail(btn) {
+  return function (e) { busy(btn, false); toast(e.message, 'err'); };
+}
+
+function actionLabel(a) {
+  var m = {
+    SUBMIT: 'ช่างส่งคำขอ', ADD_OPTION: 'จัดซื้อเสนอตัวเลือก', CONFIRM_SPEC: 'ช่างยืนยันสเปค',
+    REJECT_SPEC: 'ช่างแจ้งไม่ตรงสเปค', REQUEST_CHANGE: 'ช่างขอให้แก้ไข',
+    CHOOSE_SUPPLIER: 'เลือกให้จัดซื้อสั่งซื้อ', CHOOSE_LOCAL: 'เลือกซื้อเองที่ร้าน',
+    APPROVE_PURCHASE: 'จัดซื้ออนุมัติ', REJECT_PURCHASE: 'จัดซื้อไม่อนุมัติ',
+    UPLOAD_RECEIPT: 'ช่างส่งใบเสร็จ', NOTE_TO_TECH: 'ข้อความจากจัดซื้อ',
+    STATUS_ORDERED: 'บันทึกว่าสั่งซื้อแล้ว', STATUS_RECEIVED: 'บันทึกว่ารับของแล้ว',
+    STATUS_CLOSED: 'ปิดงาน', STATUS_CANCELLED: 'ยกเลิก', WITHDRAW_OPTION: 'จัดซื้อถอนตัวเลือก',
+    LINE_SENT: 'ส่ง LINE แจ้งช่าง'
+  };
+  return m[a] || a;
+}
+
+$('#me').addEventListener('change', function () { lsSet('tech_name', this.value.trim()); });
+load(false);
+</script>

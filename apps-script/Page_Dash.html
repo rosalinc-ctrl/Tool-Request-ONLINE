@@ -1,0 +1,349 @@
+<!-- หน้าจัดซื้อ (Purchasing dashboard) -->
+<?!= include('Style'); ?>
+<header class="top">
+  <div class="t">📋 หน้าจัดซื้อ <span style="font-weight:400;font-size:13px">/ Purchasing</span></div>
+  <div class="s" id="h_sub">Meiwa Tool Request</div>
+</header>
+
+<div class="wrap">
+  <!-- login -->
+  <div id="login" class="card">
+    <h3>เข้าสู่ระบบจัดซื้อ</h3>
+    <label>ชื่อผู้ใช้งาน <span class="en">/ Your name</span></label>
+    <input id="l_name" placeholder="เช่น คุณแนน (จัดซื้อ)">
+    <label class="req">PIN</label>
+    <input id="l_pin" type="password" inputmode="numeric" placeholder="รหัสจากชีต Config">
+    <div class="btn-row"><button class="btn btn-primary" id="l_btn">เข้าสู่ระบบ</button></div>
+  </div>
+
+  <div id="main" class="hide">
+    <div class="tabs" id="tabs"></div>
+    <input id="q" placeholder="🔎 ค้นหา: ชื่อเครื่องมือ / ชื่อช่าง / เลขที่รายการ" style="margin:6px 0">
+    <div class="muted small" id="summary"></div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<div id="lightbox" onclick="zoomClose()">
+  <img id="lb-img" src="" alt="">
+  <div class="lb-bar"><a id="lb-open" href="#" target="_blank" rel="noopener" onclick="event.stopPropagation()">เปิดไฟล์ต้นฉบับ</a><span>แตะเพื่อปิด</span></div>
+</div>
+
+<?!= include('ClientLib'); ?>
+<script>
+var ST = null;            // ข้อมูลล่าสุดจากเซิร์ฟเวอร์
+var STAFF = { token: '', name: '' };
+var FILTER = '';
+var ORDER = ['NEED_OPTION', 'TECH_SPEC', 'TECH_MODE', 'APPROVAL', 'TO_ORDER', 'ORDERED', 'LOCAL_BUY', 'DONE', 'PUR_REJECTED', 'CANCELLED'];
+var SHORT = {
+  NEED_OPTION: 'รอเสนอราคา', TECH_SPEC: 'รอช่างยืนยัน', TECH_MODE: 'รอเลือกวิธีซื้อ',
+  APPROVAL: 'รออนุมัติ', TO_ORDER: 'รอสั่งซื้อ', ORDERED: 'สั่งแล้ว',
+  LOCAL_BUY: 'ช่างซื้อเอง', DONE: 'เสร็จสิ้น', PUR_REJECTED: 'ไม่อนุมัติ', CANCELLED: 'ยกเลิก'
+};
+var CLS = {
+  NEED_OPTION: 'y', TECH_SPEC: 'b', TECH_MODE: 'b', APPROVAL: 'y', TO_ORDER: 'g',
+  ORDERED: 'g', LOCAL_BUY: 'y', DONE: 'g', PUR_REJECTED: 'r', CANCELLED: 'r'
+};
+
+function login() {
+  var btn = $('#l_btn');
+  busy(btn, true, 'กำลังเข้าสู่ระบบ...');
+  api('apiStaffLogin', $('#l_pin').value, $('#l_name').value).then(function (r) {
+    busy(btn, false);
+    STAFF = r;
+    lsSet('staff_name', r.name);
+    $('#login').classList.add('hide');
+    $('#main').classList.remove('hide');
+    $('#h_sub').textContent = 'ผู้ใช้งาน: ' + r.name;
+    refresh();
+  }).catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function refresh(quiet) {
+  return api('apiStaffData', STAFF.token, { stage: FILTER, q: $('#q').value.trim() })
+    .then(function (d) {
+      ST = d;
+      render();
+      if (!quiet) toast('อัปเดตแล้ว', 'ok');
+    })
+    .catch(function (e) {
+      toast(e.message, 'err');
+      if (/เซสชัน|Session/.test(e.message)) {
+        $('#main').classList.add('hide');
+        $('#login').classList.remove('hide');
+      }
+    });
+}
+
+function render() {
+  $('#tabs').innerHTML =
+    '<span class="chip ' + (FILTER === '' ? 'sel' : '') + '" onclick="setFilter(\'\')">ทั้งหมด</span>' +
+    ORDER.map(function (s) {
+      var n = ST.counts[s] || 0;
+      if (!n && ['DONE', 'PUR_REJECTED', 'CANCELLED'].indexOf(s) >= 0) return '';
+      return '<span class="chip ' + (CLS[s] || '') + ' ' + (FILTER === s ? 'sel' : '') +
+        '" onclick="setFilter(\'' + s + '\')">' + SHORT[s] + ' ' + n + '</span>';
+    }).join('');
+  $('#summary').textContent = 'แสดง ' + ST.items.length + ' รายการ' + (FILTER ? (' • ' + SHORT[FILTER]) : '');
+  $('#list').innerHTML = ST.items.map(row).join('') ||
+    '<div class="card muted">ไม่มีรายการในหมวดนี้</div>';
+}
+
+function setFilter(s) { FILTER = s; refresh(true); }
+
+function row(it) {
+  var h = [];
+  h.push('<div class="card">');
+  h.push('<div class="item-head"><div><h3 style="margin:0">' + esc(it.tool_name) + ' <span class="muted small">x' + esc(it.qty) + ' ' + esc(it.unit) + '</span></h3>' +
+    '<div class="muted small">' + esc(it.item_id) + ' • ' + esc(it.requester_name) + (it.site ? (' (' + esc(it.site) + ')') : '') +
+    ' • ต้องการใช้ ' + esc(it.required_date || '-') + '</div></div>' +
+    '<span class="chip ' + (CLS[it.stage] || '') + '">' + SHORT[it.stage] + '</span></div>');
+
+  if (it.line_pending) h.push('<div class="banner warnb small">มีข้อความรอส่งให้ช่างทาง LINE</div>');
+
+  // สิ่งที่ช่างขอ
+  h.push('<details ' + (['NEED_OPTION', 'TECH_SPEC'].indexOf(it.stage) >= 0 ? 'open' : '') + '><summary>สิ่งที่ช่างขอ / Request detail</summary>');
+  if (it.intended_use) h.push(kv('ใช้ทำอะไร', esc(it.intended_use)));
+  if (it.spec_pref) h.push(kv('สเปค/ยี่ห้อ', esc(it.spec_pref)));
+  if (numOf(it.benchmark_price)) h.push(kv('ราคาที่ร้าน', '<b>' + baht(it.benchmark_price) + '</b>/หน่วย (' + esc(it.benchmark_store || '-') + ') → รวม ' + baht(numOf(it.benchmark_price) * numOf(it.qty))));
+  if (it.ref_links) h.push(kv('ลิงก์', '<a href="' + esc(it.ref_links) + '" target="_blank" rel="noopener">เปิด</a>'));
+  if (it.contact) h.push(kv('ติดต่อช่าง', esc(it.contact)));
+  if (it.photos.length) h.push('<div class="thumbs">' + it.photos.map(function (p) { return imgTag(p, 'thumb', 'รูปจากช่าง'); }).join('') + '</div>');
+  h.push('</details>');
+
+  // ตัวเลือกที่เสนอไปแล้ว
+  if (it.options.length) {
+    h.push('<details open><summary>ตัวเลือกที่เสนอ (' + it.options.length + ')</summary>');
+    it.options.forEach(function (o) {
+      var chosen = String(it.chosen_option_id) === String(o.option_id);
+      h.push('<div class="opt' + (chosen ? ' chosen' : '') + '">' +
+        (o.photo_url ? imgTag(o.photo_url, 'thumb', o.brand_model) : '') +
+        '<div><b>' + esc(o.brand_model) + '</b> — ' + esc(o.supplier) +
+        (chosen ? ' <span class="chip g">ช่างยืนยัน</span>' : '') +
+        (o.status === 'REJECTED' ? ' <span class="chip r">ไม่ตรงสเปค</span>' : '') +
+        (o.status === 'CHANGE_REQUESTED' ? ' <span class="chip y">ขอแก้ไข</span>' : '') + '</div>' +
+        '<div class="small">รวม <b>' + baht(o.total_cost) + '</b> • ' + baht(o.unit_price) + '/หน่วย + ค่าส่ง ' + baht(o.shipping) +
+        ' + VAT ' + esc(o.vat_rate) + '% • ได้ของ ' + esc(o.delivery_date || o.availability || '-') +
+        ' • ' + esc(o.payment_terms || '-') + '</div>' +
+        (['NEED_OPTION', 'TECH_SPEC'].indexOf(it.stage) >= 0 ?
+          ('<div class="btn-row"><button class="btn btn-sm btn-danger" onclick="withdraw(\'' + o.option_id + '\',this)">ถอนตัวเลือกนี้</button></div>') : '') +
+        '</div>');
+    });
+    h.push('</details>');
+  }
+
+  if (it.tech_note) h.push('<div class="banner info small"><b>ช่างบันทึกไว้:</b> ' + esc(it.tech_note) +
+    (it.decided_by ? (' — ' + esc(it.decided_by) + ' ' + fmtDT(it.decided_at)) : '') + '</div>');
+  if (it.pur_note) h.push('<div class="banner info small"><b>ข้อความถึงช่าง:</b> ' + esc(it.pur_note) + '</div>');
+
+  h.push(actions(it));
+
+  h.push('<div class="btn-row">' +
+    '<button class="btn btn-sm" onclick="toggleBox(\'note_' + it.item_id + '\',noteForm,\'' + it.item_id + '\')">💬 ส่งข้อความถึงช่าง</button>' +
+    '<button class="btn btn-sm" onclick="lineMsg(\'' + it.req_id + '\')">📱 ข้อความ LINE</button>' +
+    '<a class="btn btn-sm" href="' + esc(it.tech_link) + '" target="_blank" rel="noopener">🔗 หน้าช่าง</a>' +
+    '<button class="btn btn-sm" onclick="hist(\'' + it.item_id + '\')">🕘 ประวัติ</button>' +
+    '</div>');
+  h.push('<div id="box_' + it.item_id + '"></div>');
+  h.push('</div>');
+  return h.join('');
+}
+
+function kv(k, v) { return '<div class="kv"><b>' + esc(k) + '</b><span>' + v + '</span></div>'; }
+
+function actions(it) {
+  var h = [];
+  if (['NEED_OPTION', 'TECH_SPEC', 'TECH_MODE'].indexOf(it.stage) >= 0) {
+    h.push('<div class="btn-row"><button class="btn btn-primary" onclick="toggleBox(\'opt_' + it.item_id + '\',optionForm,\'' + it.item_id + '\')">➕ เพิ่มตัวเลือก/เสนอราคา</button></div>');
+  }
+  if (it.stage === 'APPROVAL') {
+    var total = 0, detail = '';
+    if (it.fulfil_mode === 'LOCAL') {
+      total = numOf(it.local_est_price) * numOf(it.qty);
+      detail = 'ช่างซื้อเองที่ ' + esc(it.local_store || '-') + ' • ประเมิน ' + baht(it.local_est_price) + '/หน่วย → รวม ' + baht(total) +
+        '<br>ยืนยันขอใบกำกับภาษีในนามบริษัทได้: ' + (it.tax_invoice_ok === 'Y' ? '✔ ใช่' : '✖ ไม่');
+    } else {
+      var o = it.options.filter(function (x) { return String(x.option_id) === String(it.chosen_option_id); })[0];
+      total = numOf(o ? o.total_cost : 0);
+      detail = 'จัดซื้อสั่งซื้อ • ' + esc(o ? o.brand_model : '-') + ' จาก ' + esc(o ? o.supplier : '-') + ' รวม ' + baht(total);
+    }
+    var limit = numOf(ST.config.approvalLimit);
+    h.push('<div class="banner ' + (limit && total > limit ? 'warnb' : 'info') + '">' +
+      '<b>รออนุมัติสั่งซื้อ</b><br><span class="small">' + detail +
+      '<br>ช่างตัดสินใจโดย ' + esc(it.decided_by) + ' เมื่อ ' + fmtDT(it.decided_at) + '</span>' +
+      (limit && total > limit ? ('<br><b class="small">ยอดเกิน ' + baht(limit) + ' — ให้ผู้จัดการเป็นผู้อนุมัติ</b>') : '') + '</div>');
+    h.push('<label>เลขที่ PO / เอกสารอ้างอิง <span class="en">/ PO ref</span></label>' +
+      '<input id="po_' + it.item_id + '" placeholder="เช่น PO-2026-0142">' +
+      '<label>หมายเหตุการอนุมัติ</label><input id="an_' + it.item_id + '" placeholder="ไม่บังคับ">' +
+      '<div class="btn-row">' +
+      '<button class="btn btn-ok" onclick="approve(\'' + it.item_id + '\',true,this)">✅ อนุมัติสั่งซื้อ</button>' +
+      '<button class="btn btn-danger" onclick="approve(\'' + it.item_id + '\',false,this)">❌ ไม่อนุมัติ</button>' +
+      '</div>');
+  }
+  if (it.stage === 'TO_ORDER') {
+    h.push('<div class="btn-row"><button class="btn btn-primary" onclick="setStatus(\'' + it.item_id + '\',\'ORDERED\',this)">📦 บันทึกว่าสั่งซื้อแล้ว</button></div>');
+  }
+  if (it.stage === 'ORDERED') {
+    h.push('<div class="btn-row"><button class="btn btn-ok" onclick="setStatus(\'' + it.item_id + '\',\'RECEIVED\',this)">✅ รับของแล้ว</button></div>');
+  }
+  if (it.stage === 'LOCAL_BUY') {
+    h.push('<div class="banner warnb small">อนุมัติแล้ว รอช่างไปซื้อและอัปโหลดใบเสร็จ • ร้าน ' + esc(it.local_store || '-') +
+      ' • ประเมิน ' + baht(it.local_est_price) + (it.po_ref ? (' • ' + esc(it.po_ref)) : '') + '</div>');
+  }
+  if (it.stage === 'DONE') {
+    h.push('<div class="banner okb small">เสร็จสิ้น' +
+      (it.receipt_url ? (' • <a href="' + esc(it.receipt_url) + '" target="_blank" rel="noopener">ดูใบเสร็จ</a>') : '') +
+      (it.approved_by ? (' • อนุมัติโดย ' + esc(it.approved_by) + ' ' + fmtDT(it.approved_at)) : '') + '</div>');
+    if (it.purchase_status !== 'CLOSED') {
+      h.push('<div class="btn-row"><button class="btn btn-sm" onclick="setStatus(\'' + it.item_id + '\',\'CLOSED\',this)">ปิดงาน</button></div>');
+    }
+  }
+  if (['DONE', 'CANCELLED', 'PUR_REJECTED'].indexOf(it.stage) < 0) {
+    h.push('<div class="btn-row"><button class="btn btn-sm btn-danger" onclick="setStatus(\'' + it.item_id + '\',\'CANCELLED\',this)">ยกเลิกรายการ</button></div>');
+  }
+  return h.join('');
+}
+
+/* ---------- กล่องฟอร์ม ---------- */
+var openBox = {};
+function toggleBox(key, builder, itemId) {
+  var box = $('#box_' + itemId);
+  if (openBox[itemId] === key) { box.innerHTML = ''; openBox[itemId] = null; return; }
+  openBox[itemId] = key;
+  box.innerHTML = builder(itemId);
+}
+
+function optionForm(itemId) {
+  var it = ST.items.filter(function (x) { return x.item_id === itemId; })[0];
+  return '<div class="card" style="background:#f8fbff">' +
+    '<h3>เสนอตัวเลือกสำหรับ ' + esc(it.tool_name) + ' (x' + esc(it.qty) + ')</h3>' +
+    '<label class="req">ยี่ห้อ/รุ่น <span class="en">/ Brand - model</span></label><input id="o_brand_' + itemId + '">' +
+    '<label>สเปคสำคัญ <span class="en">/ Key specs</span></label><textarea id="o_spec_' + itemId + '" placeholder="กำลังไฟ ขนาด อุปกรณ์ที่ให้มา ระยะประกัน"></textarea>' +
+    '<label class="req">ผู้ขาย/ร้าน <span class="en">/ Supplier</span></label><input id="o_sup_' + itemId + '">' +
+    '<label>ลิงก์สินค้า <span class="en">/ Product link</span></label><input id="o_link_' + itemId + '">' +
+    '<label>รูปสินค้า (อัปโหลด) <span class="en">/ Photo</span></label><input id="o_photo_' + itemId + '" type="file" accept="image/*">' +
+    '<label>หรือวางลิงก์รูปภาพ <span class="en">/ Image URL</span></label><input id="o_photourl_' + itemId + '" placeholder="https://...">' +
+    '<div class="grid3">' +
+    '<div><label class="req">ราคา/หน่วย (ไม่รวม VAT)</label><input id="o_price_' + itemId + '" type="number" inputmode="decimal" step="0.01"></div>' +
+    '<div><label>VAT %</label><input id="o_vat_' + itemId + '" type="number" step="0.01" value="' + esc(ST.config.vatRate) + '"></div>' +
+    '<div><label>ค่าส่ง</label><input id="o_ship_' + itemId + '" type="number" step="0.01" value="0"></div>' +
+    '</div>' +
+    '<div class="grid2">' +
+    '<div><label>สถานะสินค้า <span class="en">/ Availability</span></label><input id="o_avail_' + itemId + '" placeholder="มีของ / สั่งผลิต 7 วัน"></div>' +
+    '<div><label>วันที่ได้ของ <span class="en">/ Delivery</span></label><input id="o_deliv_' + itemId + '" type="date"></div>' +
+    '</div>' +
+    '<label>เงื่อนไขชำระเงิน <span class="en">/ Payment terms</span></label><input id="o_pay_' + itemId + '" placeholder="เครดิต 30 วัน / โอนก่อนส่ง">' +
+    '<label>หมายเหตุถึงช่าง</label><input id="o_note_' + itemId + '">' +
+    '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="o_rec_' + itemId + '" style="width:20px;height:20px"> <span>จัดซื้อแนะนำตัวเลือกนี้</span></label>' +
+    '<div class="btn-row"><button class="btn btn-primary" onclick="addOption(\'' + itemId + '\',this)">บันทึกและแจ้งช่าง</button></div>' +
+    '</div>';
+}
+
+function addOption(itemId, btn) {
+  var g = function (p) { var el = $('#' + p + '_' + itemId); return el ? el.value.trim() : ''; };
+  var payload = {
+    brand_model: g('o_brand'), spec: g('o_spec'), supplier: g('o_sup'),
+    product_link: g('o_link'), photo_url: g('o_photourl'),
+    unit_price: numOf(g('o_price')), vat_rate: g('o_vat'), shipping: numOf(g('o_ship')),
+    availability: g('o_avail'), delivery_date: g('o_deliv'), payment_terms: g('o_pay'),
+    note: g('o_note'), is_recommended: $('#o_rec_' + itemId).checked
+  };
+  if (!payload.brand_model || !payload.supplier || !payload.unit_price) {
+    toast('กรอก ยี่ห้อ/รุ่น, ผู้ขาย และราคาต่อหน่วย ให้ครบ', 'err'); return;
+  }
+  var f = $('#o_photo_' + itemId).files[0];
+  busy(btn, true, 'กำลังบันทึก...');
+  (f ? readFileForUpload(f, 1400, 0.82) : Promise.resolve(null))
+    .then(function (file) {
+      if (file) payload.photo = file;
+      return api('apiAddOption', STAFF.token, itemId, payload);
+    })
+    .then(function () { busy(btn, false); toast('บันทึกตัวเลือกแล้ว — แจ้งช่างให้ยืนยัน', 'ok'); openBox[itemId] = null; refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function noteForm(itemId) {
+  var it = ST.items.filter(function (x) { return x.item_id === itemId; })[0];
+  return '<div class="card" style="background:#f8fbff">' +
+    '<label>ข้อความถึงช่าง (แสดงบนหน้าช่าง)</label>' +
+    '<textarea id="n_' + itemId + '" placeholder="เช่น รุ่นนี้ที่ Global House ถูกกว่าและได้ของวันนี้ แนะนำให้ช่างซื้อเองแล้วเบิกคืน">' + esc(it.pur_note || '') + '</textarea>' +
+    '<div class="btn-row"><button class="btn btn-primary" onclick="saveNote(\'' + itemId + '\',this)">ส่งข้อความ</button></div></div>';
+}
+
+function saveNote(itemId, btn) {
+  busy(btn, true, 'กำลังส่ง...');
+  api('apiSetPurNote', STAFF.token, itemId, $('#n_' + itemId).value.trim())
+    .then(function () { busy(btn, false); toast('ส่งข้อความแล้ว', 'ok'); openBox[itemId] = null; refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function approve(itemId, ok, btn) {
+  var note = ($('#an_' + itemId) || {}).value || '';
+  var po = ($('#po_' + itemId) || {}).value || '';
+  if (!ok && !note.trim()) { toast('กรุณาระบุเหตุผลที่ไม่อนุมัติในช่องหมายเหตุ', 'err'); return; }
+  busy(btn, true, 'กำลังบันทึก...');
+  api('apiApprove', STAFF.token, itemId, ok, note, po)
+    .then(function () { busy(btn, false); toast(ok ? 'อนุมัติแล้ว' : 'บันทึกไม่อนุมัติแล้ว', 'ok'); refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function setStatus(itemId, status, btn) {
+  busy(btn, true, 'กำลังบันทึก...');
+  api('apiSetPurchaseStatus', STAFF.token, itemId, status, '', '')
+    .then(function () { busy(btn, false); toast('อัปเดตสถานะแล้ว', 'ok'); refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function withdraw(optionId, btn) {
+  busy(btn, true, 'กำลังถอน...');
+  api('apiWithdrawOption', STAFF.token, optionId)
+    .then(function () { busy(btn, false); toast('ถอนตัวเลือกแล้ว', 'ok'); refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function hist(itemId) {
+  var box = $('#box_' + itemId);
+  openBox[itemId] = 'hist';
+  box.innerHTML = '<div class="card muted">กำลังโหลดประวัติ...</div>';
+  api('apiItemHistory', STAFF.token, itemId).then(function (rows) {
+    box.innerHTML = '<div class="card"><h3>ประวัติ ' + esc(itemId) + '</h3>' +
+      (rows.length ? rows.slice().reverse().map(function (x) {
+        return '<div class="hist"><b>' + fmtDT(x.ts) + '</b> — ' + esc(x.actor) + ' (' + esc(x.role) + ')<br>' +
+          esc(x.action) + (x.detail ? (': ' + esc(x.detail)) : '') + '</div>';
+      }).join('') : '<div class="muted">ยังไม่มีประวัติ</div>') + '</div>';
+  }).catch(function (e) { box.innerHTML = '<div class="banner err">' + esc(e.message) + '</div>'; });
+}
+
+function lineMsg(reqId) {
+  api('apiLineText', STAFF.token, reqId).then(function (r) {
+    var texts = (r.pending || []).map(function (p) { return p.message; });
+    texts.push(r.summary);
+    var all = texts.join('\n\n──────────\n\n');
+    var box = document.createElement('div');
+    box.className = 'card';
+    box.innerHTML = '<h3>ข้อความสำหรับส่ง LINE — ' + esc(reqId) + '</h3>' +
+      '<textarea id="linetext" style="min-height:200px">' + esc(all) + '</textarea>' +
+      '<div class="btn-row">' +
+      '<button class="btn btn-primary" onclick="copyLine(\'' + reqId + '\')">📋 คัดลอก + ทำเครื่องหมายว่าส่งแล้ว</button>' +
+      '<button class="btn btn-sm" onclick="this.closest(\'.card\').remove()">ปิด</button></div>';
+    $('#list').insertBefore(box, $('#list').firstChild);
+    window.scrollTo(0, 0);
+  }).catch(function (e) { toast(e.message, 'err'); });
+}
+
+function copyLine(reqId) {
+  copyText($('#linetext').value).then(function (ok) {
+    toast(ok ? 'คัดลอกแล้ว — วางในแชท LINE ของช่าง' : 'คัดลอกไม่สำเร็จ กรุณาเลือกข้อความแล้วคัดลอกเอง', ok ? 'ok' : 'err');
+    if (ok) api('apiMarkLineSent', STAFF.token, reqId).then(function () { refresh(true); });
+  });
+}
+
+$('#l_btn').addEventListener('click', login);
+$('#l_pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') login(); });
+$('#l_name').value = lsGet('staff_name', '');
+var qTimer = null;
+$('#q').addEventListener('input', function () {
+  clearTimeout(qTimer);
+  qTimer = setTimeout(function () { refresh(true); }, 400);
+});
+</script>

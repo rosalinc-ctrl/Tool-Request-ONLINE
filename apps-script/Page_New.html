@@ -1,0 +1,248 @@
+<!-- ฟอร์มขอซื้อเครื่องมือ (ช่าง) -->
+<?!= include('Style'); ?>
+<header class="top">
+  <div class="t">🔧 ใบขอซื้อเครื่องมือ <span style="font-weight:400;font-size:13px">/ Tool Request</span></div>
+  <div class="s">Meiwa — ขอได้หลายรายการในใบเดียว ส่งจากมือถือได้เลย</div>
+</header>
+
+<div class="wrap" id="app">
+  <div class="banner info">
+    ถ่ายรูปเครื่องมือตัวเดิมที่ใช้อยู่ หรือวางลิงก์สินค้าจากเว็บ จะช่วยให้จัดซื้อหาของได้ตรงที่สุด
+    <br><span class="small">Photo of your current tool or a product link helps purchasing find the exact item.</span>
+  </div>
+
+  <div class="card">
+    <h3>1. ข้อมูลผู้ขอ <span class="muted small">/ Requester</span></h3>
+    <label class="req">ชื่อช่างผู้ขอ <span class="en">/ Name</span></label>
+    <input id="f_name" list="techlist" placeholder="เลือกหรือพิมพ์ชื่อ" autocomplete="off">
+    <datalist id="techlist"></datalist>
+
+    <div class="grid2">
+      <div>
+        <label>หน่วยงาน/ไซต์ <span class="en">/ Site</span></label>
+        <input id="f_site" placeholder="เช่น โรงงาน 1">
+      </div>
+      <div>
+        <label>ช่องทางติดต่อ <span class="en">/ LINE, Tel</span></label>
+        <input id="f_contact" placeholder="LINE ID หรือเบอร์โทร">
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div>
+        <label class="req">ต้องการใช้ภายในวันที่ <span class="en">/ Required date</span></label>
+        <input id="f_date" type="date">
+      </div>
+      <div>
+        <label>หมายเหตุถึงจัดซื้อ <span class="en">/ Note</span></label>
+        <input id="f_note" placeholder="เช่น งานด่วน ใช้ซ่อมไลน์ 3">
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-title">2. รายการเครื่องมือ / Tools</div>
+  <div id="items"></div>
+
+  <button class="btn" id="btn_add" type="button">➕ เพิ่มเครื่องมืออีกรายการ</button>
+
+  <div class="card" style="margin-top:14px">
+    <div class="muted small">
+      ระบบจะสร้าง <b>ลิงก์ติดตาม 1 ลิงก์ต่อ 1 ใบ</b> — เก็บลิงก์ไว้ใน LINE เพื่อกดยืนยันสเปคและดูราคาทีหลัง
+    </div>
+  </div>
+  <div style="height:8px"></div>
+  <div id="result"></div>
+</div>
+
+<div class="sticky-bottom" id="bar">
+  <div class="wrapb">
+    <button class="btn btn-primary" id="btn_submit" type="button">ส่งคำขอ / Submit</button>
+  </div>
+</div>
+
+<div id="lightbox" onclick="zoomClose()">
+  <img id="lb-img" src="" alt="">
+  <div class="lb-bar"><a id="lb-open" href="#" target="_blank" rel="noopener" onclick="event.stopPropagation()">เปิดไฟล์ต้นฉบับ</a><span>แตะเพื่อปิด</span></div>
+</div>
+
+<?!= include('ClientLib'); ?>
+<script>
+var DATA = <?!= jsonFor_(DATA) ?>;
+var TECHS = (DATA && DATA.technicians) || [];
+var CFG = (DATA && DATA.config) || {};
+var photoStore = {};
+var seq = 0;
+
+function itemTemplate(k) {
+  return '' +
+  '<div class="card item" data-k="' + k + '">' +
+    '<div class="item-head">' +
+      '<h3 style="margin:0"><span class="num it-no"></span>เครื่องมือ</h3>' +
+      '<button class="btn btn-sm btn-danger" type="button" onclick="removeItem(' + k + ')">ลบ</button>' +
+    '</div>' +
+    '<label class="req">ชื่อเครื่องมือ <span class="en">/ Tool name</span></label>' +
+    '<input class="f_tool" placeholder="เช่น สว่านโรตารี่ 26 มม.">' +
+    '<div class="grid3">' +
+      '<div><label class="req">จำนวน <span class="en">/ Qty</span></label><input class="f_qty" type="number" inputmode="decimal" min="1" step="1" value="1"></div>' +
+      '<div><label>หน่วย <span class="en">/ Unit</span></label><input class="f_unit" value="ชิ้น"></div>' +
+      '<div><label>ราคาที่เห็นที่ร้าน <span class="en">/ Price seen</span></label><input class="f_bprice" type="number" inputmode="decimal" min="0" step="0.01" placeholder="บาท"></div>' +
+    '</div>' +
+    '<label>ร้านที่ไปดูราคามา <span class="en">/ Store</span></label>' +
+    '<input class="f_bstore" value="' + esc(CFG.benchmarkStore || '') + '" placeholder="เช่น Global House">' +
+    '<label>ใช้ทำอะไร <span class="en">/ Intended use</span></label>' +
+    '<textarea class="f_use" placeholder="เช่น เจาะปูนยึดแป้นมอเตอร์ ไลน์ 3"></textarea>' +
+    '<label>สเปค / ยี่ห้อที่ต้องการ <span class="en">/ Spec or preferred brand</span></label>' +
+    '<textarea class="f_spec" placeholder="เช่น SDS-Plus 800W ขึ้นไป ยี่ห้อ Bosch หรือ Makita"></textarea>' +
+    '<label>ลิงก์สินค้าอ้างอิง <span class="en">/ Reference link</span></label>' +
+    '<input class="f_link" placeholder="วางลิงก์จาก Shopee / Lazada / เว็บร้าน">' +
+    '<label>รูปเครื่องมือตัวเดิม หรือรูปที่ร้าน <span class="en">/ Photos (สูงสุด 4 รูป)</span></label>' +
+    '<input class="f_photo" type="file" accept="image/*" multiple onchange="onPhotos(this,' + k + ')">' +
+    '<div class="thumbs prev"></div>' +
+  '</div>';
+}
+
+function addItem() {
+  var k = ++seq;
+  photoStore[k] = [];
+  $('#items').insertAdjacentHTML('beforeend', itemTemplate(k));
+  renumber();
+  return k;
+}
+
+function removeItem(k) {
+  var el = $('.item[data-k="' + k + '"]');
+  if (!el) return;
+  if ($$('.item').length <= 1) { toast('ต้องมีอย่างน้อย 1 รายการ', 'err'); return; }
+  el.parentNode.removeChild(el);
+  delete photoStore[k];
+  renumber();
+}
+
+function renumber() {
+  $$('.item').forEach(function (el, i) { $('.it-no', el).textContent = (i + 1); });
+}
+
+function onPhotos(input, k) {
+  var files = Array.prototype.slice.call(input.files || []);
+  if (!files.length) return;
+  var room = 4 - photoStore[k].length;
+  if (room <= 0) { toast('ใส่รูปได้สูงสุด 4 รูปต่อรายการ', 'err'); input.value = ''; return; }
+  files = files.slice(0, room);
+  toast('กำลังย่อรูป ' + files.length + ' รูป...');
+  Promise.all(files.map(function (f) { return readFileForUpload(f, 1400, 0.82); }))
+    .then(function (list) {
+      list.forEach(function (p) { photoStore[k].push(p); });
+      drawPreview(k);
+      toast('เพิ่มรูปแล้ว', 'ok');
+    })
+    .catch(function (e) { toast(e.message, 'err'); })
+    .then(function () { input.value = ''; });
+}
+
+function drawPreview(k) {
+  var box = $('.item[data-k="' + k + '"] .prev');
+  box.innerHTML = photoStore[k].map(function (p, i) {
+    return '<div style="position:relative">' +
+      '<img class="thumb" src="data:' + p.mime + ';base64,' + p.dataB64 + '">' +
+      '<button type="button" onclick="dropPhoto(' + k + ',' + i + ')" ' +
+      'style="position:absolute;top:-6px;right:-6px;background:#b42318;color:#fff;border:0;border-radius:50%;width:24px;height:24px;font-size:14px;line-height:1">×</button>' +
+      '</div>';
+  }).join('');
+}
+function dropPhoto(k, i) { photoStore[k].splice(i, 1); drawPreview(k); }
+
+function collect() {
+  var name = $('#f_name').value.trim();
+  if (!name) throw new Error('กรุณาระบุชื่อผู้ขอ');
+  var date = $('#f_date').value;
+  if (!date) throw new Error('กรุณาระบุวันที่ต้องการใช้');
+
+  var items = [];
+  $$('.item').forEach(function (el) {
+    var k = el.getAttribute('data-k');
+    var tool = $('.f_tool', el).value.trim();
+    if (!tool) return;
+    items.push({
+      tool_name: tool,
+      qty: numOf($('.f_qty', el).value) || 1,
+      unit: $('.f_unit', el).value.trim() || 'ชิ้น',
+      intended_use: $('.f_use', el).value.trim(),
+      spec_pref: $('.f_spec', el).value.trim(),
+      benchmark_price: numOf($('.f_bprice', el).value),
+      benchmark_store: $('.f_bstore', el).value.trim(),
+      ref_links: $('.f_link', el).value.trim(),
+      photos: photoStore[k] || []
+    });
+  });
+  if (!items.length) throw new Error('กรุณากรอกชื่อเครื่องมืออย่างน้อย 1 รายการ');
+
+  return {
+    requester_name: name,
+    site: $('#f_site').value.trim(),
+    contact: $('#f_contact').value.trim(),
+    required_date: date,
+    note: $('#f_note').value.trim(),
+    items: items
+  };
+}
+
+function submit() {
+  var btn = $('#btn_submit');
+  var payload;
+  try { payload = collect(); } catch (e) { toast(e.message, 'err'); return; }
+  busy(btn, true, 'กำลังส่ง...');
+  api('apiSubmitRequest', payload).then(function (res) {
+    busy(btn, false);
+    showResult(res);
+  }).catch(function (e) {
+    busy(btn, false);
+    toast(e.message, 'err');
+  });
+}
+
+function showResult(res) {
+  $('#items').classList.add('hide');
+  $('#btn_add').classList.add('hide');
+  $('#bar').classList.add('hide');
+  $$('.card').forEach(function (c) { if (!c.classList.contains('item')) c.classList.add('hide'); });
+  $('.banner.info').classList.add('hide');
+
+  $('#result').innerHTML =
+    '<div class="card">' +
+      '<div class="banner okb"><b>ส่งคำขอเรียบร้อย</b><br>เลขที่ ' + esc(res.req_id) + ' — แจ้งฝ่ายจัดซื้อแล้ว</div>' +
+      '<p class="small"><b>สำคัญ:</b> เก็บลิงก์นี้ไว้ในแชท LINE ใช้กดยืนยันสเปคและดูราคาทีหลัง</p>' +
+      '<input id="linkbox" readonly value="' + esc(res.url) + '">' +
+      '<div class="btn-row">' +
+        '<button class="btn btn-primary" onclick="copyLink()">📋 คัดลอกลิงก์</button>' +
+        '<a class="btn btn-ok" href="' + esc(res.url) + '">เปิดหน้าติดตาม</a>' +
+      '</div>' +
+      '<div class="btn-row"><a class="btn" href="?">+ ส่งคำขอใบใหม่</a></div>' +
+    '</div>';
+  window.scrollTo(0, 0);
+}
+
+function copyLink() {
+  copyText($('#linkbox').value).then(function (ok) {
+    toast(ok ? 'คัดลอกลิงก์แล้ว วางในแชท LINE ได้เลย' : 'คัดลอกไม่สำเร็จ กรุณากดค้างที่ช่องลิงก์แล้วคัดลอกเอง', ok ? 'ok' : 'err');
+  });
+}
+
+(function init() {
+  $('#techlist').innerHTML = TECHS.map(function (t) {
+    return '<option value="' + esc(t.name) + '">' + esc(t.site || '') + '</option>';
+  }).join('');
+  $('#f_name').value = lsGet('tech_name', '');
+  $('#f_site').value = lsGet('tech_site', '');
+  $('#f_contact').value = lsGet('tech_contact', '');
+  $('#f_name').addEventListener('change', function () {
+    lsSet('tech_name', this.value);
+    var t = TECHS.filter(function (x) { return x.name === this.value; }.bind(this))[0];
+    if (t && t.site && !$('#f_site').value) $('#f_site').value = t.site;
+  });
+  $('#f_site').addEventListener('change', function () { lsSet('tech_site', this.value); });
+  $('#f_contact').addEventListener('change', function () { lsSet('tech_contact', this.value); });
+  $('#btn_add').addEventListener('click', addItem);
+  $('#btn_submit').addEventListener('click', submit);
+  addItem();
+})();
+</script>
