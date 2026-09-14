@@ -118,7 +118,7 @@ function dailyDigest() {
     (buckets[st] = buckets[st] || []).push(it);
   });
 
-  var order = ['NEED_OPTION', 'TECH_SPEC', 'TECH_MODE', 'APPROVAL', 'TO_ORDER', 'ORDERED', 'LOCAL_BUY'];
+  var order = ['NEED_OPTION', 'CHANGE_REQ', 'TECH_SPEC', 'TECH_MODE', 'APPROVAL', 'TO_ORDER', 'ORDERED', 'LOCAL_BUY'];
   var lines = ['สรุปงานค้าง ระบบขอซื้อเครื่องมือ — ' + today_(), ''];
   var total = 0;
   order.forEach(function (st) {
@@ -129,7 +129,7 @@ function dailyDigest() {
     list.slice(0, 20).forEach(function (it) {
       var r = reqs[it.req_id] || {};
       lines.push('   - ' + it.item_id + ' ' + it.tool_name + ' x' + it.qty +
-        ' | ช่าง: ' + (r.requester_name || '-') + ' | ต้องการใช้: ' + (r.required_date || '-'));
+        ' | ช่าง: ' + (r.requester_name || '-') + ' | ต้องการใช้: ' + (it.required_date || r.required_date || '-'));
     });
     lines.push('');
   });

@@ -91,10 +91,16 @@ function itemTemplate(k) {
     '<input class="f_bstore" value="' + esc(CFG.benchmarkStore || '') + '" placeholder="เช่น Global House">' +
     '<label>ใช้ทำอะไร <span class="en">/ Intended use</span></label>' +
     '<textarea class="f_use" placeholder="เช่น เจาะปูนยึดแป้นมอเตอร์ ไลน์ 3"></textarea>' +
-    '<label>สเปค / ยี่ห้อที่ต้องการ <span class="en">/ Spec or preferred brand</span></label>' +
-    '<textarea class="f_spec" placeholder="เช่น SDS-Plus 800W ขึ้นไป ยี่ห้อ Bosch หรือ Makita"></textarea>' +
+    '<label>สเปคที่ต้องการ <span class="en">/ Required specification</span></label>' +
+    '<textarea class="f_spec" placeholder="เช่น SDS-Plus 800W ขึ้นไป / ช่วงวัด 0-10 มม. ละเอียด 0.01 มม."></textarea>' +
+    '<label>ยี่ห้อ/รุ่นที่อยากได้ <span class="en">/ Preferred brand-model</span></label>' +
+    '<input class="f_brand" placeholder="เช่น Mitutoyo 2046A หรือเทียบเท่า (ไม่มีก็เว้นว่างได้)">' +
+    '<label>ต้องการใช้ภายในวันที่ <span class="en">/ Required date (รายการนี้)</span></label>' +
+    '<input class="f_idate" type="date">' +
     '<label>ลิงก์สินค้าอ้างอิง <span class="en">/ Reference link</span></label>' +
     '<input class="f_link" placeholder="วางลิงก์จาก Shopee / Lazada / เว็บร้าน">' +
+    '<label>หมายเหตุ <span class="en">/ Notes</span></label>' +
+    '<input class="f_inote" placeholder="เช่น ของเดิมหัวจับหลวม ใช้ไม่ได้แล้ว">' +
     '<label>รูปเครื่องมือตัวเดิม หรือรูปที่ร้าน <span class="en">/ Photos (สูงสุด 4 รูป)</span></label>' +
     '<input class="f_photo" type="file" accept="image/*" multiple onchange="onPhotos(this,' + k + ')">' +
     '<div class="thumbs prev"></div>' +
@@ -166,8 +172,11 @@ function collect() {
       tool_name: tool,
       qty: numOf($('.f_qty', el).value) || 1,
       unit: $('.f_unit', el).value.trim() || 'ชิ้น',
+      required_date: $('.f_idate', el).value || date,
       intended_use: $('.f_use', el).value.trim(),
       spec_pref: $('.f_spec', el).value.trim(),
+      brand_pref: $('.f_brand', el).value.trim(),
+      item_note: $('.f_inote', el).value.trim(),
       benchmark_price: numOf($('.f_bprice', el).value),
       benchmark_store: $('.f_bstore', el).value.trim(),
       ref_links: $('.f_link', el).value.trim(),

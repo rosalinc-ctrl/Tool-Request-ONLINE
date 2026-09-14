@@ -16,18 +16,20 @@ const req = srv.apiSubmitRequest({
       benchmark_price: 4890, benchmark_store: 'Global House', ref_links: 'https://example.com/p/1',
       photos: [{ name: 'a.jpg', mime: 'image/jpeg', dataB64: jpg }] },
     { tool_name: 'ประแจทอร์ค', qty: 2, unit: 'ตัว', benchmark_price: 2150, benchmark_store: 'Global House' },
-    { tool_name: 'เครื่องเจียร', qty: 1, unit: 'ตัว' },
+    { tool_name: 'ไดอัลเกจ', qty: 1, unit: 'ตัว', intended_use: 'วัดความเยื้องศูนย์',
+      spec_pref: '0-10 มม. ละเอียด 0.01 มม.', brand_pref: 'Mitutoyo 2046A หรือเทียบเท่า',
+      item_note: 'ตัวเดิมเข็มค้าง', required_date: '2026-09-20' },
     { tool_name: 'เลื่อยวงเดือน', qty: 1, unit: 'ตัว', spec_pref: '7 นิ้ว 1400W' }
   ]
 });
 const staff = srv.apiStaffLogin('2468', 'คุณแนน');
-const id1 = req.req_id + '-1', id2 = req.req_id + '-2', id3 = req.req_id + '-3', id4 = req.req_id + '-4';
-const opt1 = srv.apiAddOption(staff.token, id1, { brand_model: 'Bosch GBH 2-26', spec: 'SDS-Plus 800W',
+const id1 = req.req_id + '-01', id2 = req.req_id + '-02', id3 = req.req_id + '-03', id4 = req.req_id + '-04';
+const opt1 = srv.apiAddOption(staff.token, id1, { brand: 'Bosch', model: 'GBH 2-26', spec: 'SDS-Plus 800W',
   supplier: 'ก.การช่าง', unit_price: 5200, vat_rate: 7, shipping: 150, availability: 'มีของ',
   delivery_date: '2026-09-18', payment_terms: 'เครดิต 30 วัน', is_recommended: true,
   photo: { name: 'b.jpg', mime: 'image/jpeg', dataB64: jpg }, product_link: 'https://shop.example/x' });
-srv.apiAddOption(staff.token, id2, { brand_model: 'Tone T4MN200', supplier: 'ไทยทูลส์', unit_price: 2600, vat_rate: 7, shipping: 0 });
-srv.apiAddOption(staff.token, id4, { brand_model: 'Makita 5806B', supplier: 'ไทยทูลส์', unit_price: 3200, vat_rate: 7, shipping: 100, availability: 'มีของ', delivery_date: '2026-09-19', payment_terms: 'เครดิต 30 วัน' });
+srv.apiAddOption(staff.token, id2, { brand: 'Tone', model: 'T4MN200', supplier: 'ไทยทูลส์', unit_price: 2600, vat_rate: 7, shipping: 0 });
+srv.apiAddOption(staff.token, id4, { brand: 'Makita', model: '5806B', supplier: 'ไทยทูลส์', unit_price: 3200, vat_rate: 7, shipping: 100, availability: 'มีของ', delivery_date: '2026-09-19', payment_terms: 'เครดิต 30 วัน' });
 srv.apiTechDecision(req.token, id1, 'CONFIRM', { by: 'ช่างสมชาย ใจดี', option_id: opt1.option_id });
 srv.apiChooseMode(req.token, id2, 'LOCAL', { by: 'ช่างสมชาย ใจดี', local_est_price: 2150, local_store: 'Global House', tax_invoice_ok: true });
 srv.apiApprove(staff.token, id2, true, 'ok', 'PC-001');
@@ -124,6 +126,8 @@ check('แสดงรูปจากช่างและรูปสินค�
 check('มีประวัติการตัดสินใจพร้อมเวลา', /ประวัติการตัดสินใจ/.test(html) && /ช่างยืนยันสเปค/.test(html));
 check('หัวเรื่องแสดงเลขที่ใบ', els['#h_title'].textContent.indexOf(req.req_id) >= 0, els['#h_title'].textContent);
 check('ไม่มี undefined หลุดใน HTML', !/undefined/.test(html), (html.match(/.{40}undefined.{40}/) || [])[0]);
+check('หน้าช่างแสดงยี่ห้อที่อยากได้/หมายเหตุรายทูล', /Mitutoyo 2046A/.test(html) && /ตัวเดิมเข็มค้าง/.test(html));
+check('หน้าช่างแสดงยี่ห้อ+รุ่นของตัวเลือก', /Bosch GBH 2-26/.test(html));
 check('ไม่มี [object Object]', !/\[object Object\]/.test(html));
 
 console.log('\n=== Page_Dash (หน้าจัดซื้อ) ===');
@@ -138,8 +142,15 @@ check('แสดงราคาอ้างอิงจากร้านขอ�
 check('มีปุ่มข้อความ LINE และหน้าช่าง', /ข้อความ LINE/.test(dhtml) && /หน้าช่าง/.test(dhtml));
 check('ลิงก์หน้าช่างมี token', dhtml.indexOf('?p=r&amp;t=' + req.token) >= 0 || dhtml.indexOf('?p=r&t=' + req.token) >= 0);
 check('ไม่มี undefined หลุดใน HTML', !/undefined/.test(dhtml), (dhtml.match(/.{40}undefined.{40}/) || [])[0]);
+check('แสดงยี่ห้อ+รุ่นของตัวเลือก', /Bosch GBH 2-26/.test(dhtml), (dhtml.match(/Bosch[^<]*/) || [])[0]);
+check('แสดงยี่ห้อ/รุ่นที่ช่างอยากได้', /Mitutoyo 2046A/.test(dhtml));
+check('แสดงหมายเหตุรายทูลของช่าง', /ตัวเดิมเข็มค้าง/.test(dhtml));
+check('มีแท็บหมวดช่างขอแก้ไข', /ช่างขอแก้ไข/.test(els['#tabs'].innerHTML), els['#tabs'].innerHTML.slice(0, 260));
 vm.runInContext('optionForm("' + id3 + '")', dash);
-check('ฟอร์มเสนอราคาสร้างได้', /ราคา\/หน่วย \(ไม่รวม VAT\)/.test(vm.runInContext('optionForm("' + id3 + '")', dash)));
+const optForm = vm.runInContext('optionForm("' + id3 + '")', dash);
+check('ฟอร์มเสนอราคาสร้างได้', /ราคา\/หน่วย \(ไม่รวม VAT\)/.test(optForm));
+check('ฟอร์มมีช่องยี่ห้อและรุ่นแยกกัน', /o_brand_/.test(optForm) && /o_model_/.test(optForm));
+check('ฟอร์มเตือนยี่ห้อที่ช่างอยากได้', /ช่างอยากได้/.test(optForm) && /Mitutoyo 2046A/.test(optForm));
 const apprHtml = vm.runInContext('actions(ST.items.filter(function(x){return x.stage==="APPROVAL"})[0]||ST.items[0])', dash);
 check('ขั้นอนุมัติมีปุ่มอนุมัติ/ไม่อนุมัติ', true);
 
@@ -149,6 +160,8 @@ const nhtml = els['#items'].innerHTML;
 check('สร้างการ์ดรายการแรกอัตโนมัติ', /class="card item"/.test(nhtml));
 check('มีช่องราคาที่เห็นที่ร้าน + ร้านเริ่มต้น', /ราคาที่เห็นที่ร้าน/.test(nhtml) && /Global House/.test(nhtml));
 check('มีช่องอัปโหลดรูปและลิงก์อ้างอิง', /accept="image\/\*" multiple/.test(nhtml) && /ลิงก์สินค้าอ้างอิง/.test(nhtml));
+check('มีช่องยี่ห้อ/รุ่น วันที่ และหมายเหตุ รายทูล',
+  /f_brand/.test(nhtml) && /f_idate/.test(nhtml) && /f_inote/.test(nhtml));
 check('ไม่มี undefined หลุดใน HTML', !/undefined/.test(nhtml));
 
 console.log('\n----------------------------------------');

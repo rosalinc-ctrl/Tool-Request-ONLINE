@@ -37,7 +37,7 @@ var TOKEN = BOOT.token;
 var DTO = null;
 
 var STAGE_CLASS = {
-  NEED_OPTION: 'y', TECH_SPEC: 'b', TECH_MODE: 'b', APPROVAL: 'y',
+  NEED_OPTION: 'y', CHANGE_REQ: 'y', TECH_SPEC: 'b', TECH_MODE: 'b', APPROVAL: 'y',
   TO_ORDER: 'g', ORDERED: 'g', LOCAL_BUY: 'y', DONE: 'g', PUR_REJECTED: 'r', CANCELLED: 'r'
 };
 
@@ -79,7 +79,10 @@ function itemCard(it) {
   // สิ่งที่ช่างขอ
   h.push('<details><summary>ดูสิ่งที่ขอไว้ / What you asked</summary><div style="padding-top:4px">');
   if (it.intended_use) h.push(kv('ใช้ทำอะไร', it.intended_use));
-  if (it.spec_pref) h.push(kv('สเปค/ยี่ห้อ', it.spec_pref));
+  if (it.spec_pref) h.push(kv('สเปคที่ขอ', it.spec_pref));
+  if (it.brand_pref) h.push(kv('ยี่ห้อ/รุ่นที่อยากได้', it.brand_pref));
+  if (it.required_date) h.push(kv('ต้องการใช้ภายใน', it.required_date));
+  if (it.item_note) h.push(kv('หมายเหตุ', it.item_note));
   if (numOf(it.benchmark_price)) h.push(kv('ราคาที่ร้าน', baht(it.benchmark_price) + ' (' + esc(it.benchmark_store || '-') + ')'));
   if (it.ref_links) h.push(kv('ลิงก์', '<a href="' + esc(it.ref_links) + '" target="_blank" rel="noopener">เปิดลิงก์</a>'));
   if (it.photos && it.photos.length) {
@@ -117,8 +120,8 @@ function optionCard(it, o) {
     (o.status === 'REJECTED' ? ' rej' : '');
   var h = [];
   h.push('<div class="' + cls + '" id="opt_' + o.option_id + '">');
-  if (o.photo_url) h.push(imgTag(o.photo_url, 'photo-big', o.brand_model));
-  h.push('<div style="margin-top:8px"><b>' + esc(o.brand_model) + '</b>' +
+  if (o.photo_url) h.push(imgTag(o.photo_url, 'photo-big', bm(o)));
+  h.push('<div style="margin-top:8px"><b>' + esc(bm(o)) + '</b>' +
     (o.is_recommended === 'Y' ? ' <span class="chip g">จัดซื้อแนะนำ</span>' : '') +
     (String(it.chosen_option_id) === String(o.option_id) ? ' <span class="chip g">✔ ยืนยันแล้ว</span>' : '') +
     (o.status === 'REJECTED' ? ' <span class="chip r">ไม่ตรงสเปค</span>' : '') +
@@ -173,7 +176,7 @@ function actionArea(it) {
     var o = it.options.filter(function (x) { return String(x.option_id) === String(it.chosen_option_id); })[0];
     h.push('<div class="sec-title">เลือกวิธีซื้อ / Choose how to buy</div>');
     h.push('<table class="cmp"><tr><th></th><th>จัดซื้อสั่งซื้อ<br><span class="small muted">Purchasing buys</span></th></tr>' +
-      '<tr><th>สินค้า</th><td>' + esc(o ? o.brand_model : '-') + '</td></tr>' +
+      '<tr><th>สินค้า</th><td>' + esc(bm(o)) + '</td></tr>' +
       '<tr><th>ราคารวม</th><td><b>' + baht(o ? o.total_cost : 0) + '</b><br><span class="small muted">รวม VAT + ค่าส่ง</span></td></tr>' +
       '<tr><th>ได้ของ</th><td>' + esc(o ? (o.delivery_date || o.availability || '-') : '-') + '</td></tr>' +
       '<tr><th>ใบกำกับภาษี</th><td>ผู้ขายออกให้บริษัทโดยตรง</td></tr>' +

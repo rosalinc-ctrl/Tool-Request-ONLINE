@@ -130,6 +130,12 @@ function copyText(text) {
   });
 }
 
+/* ชื่อสินค้าที่ใช้แสดงผล = ยี่ห้อ + รุ่น */
+function bm(o) {
+  if (!o) return '-';
+  return [String(o.brand || ''), String(o.model || '')].filter(Boolean).join(' ').trim() || '-';
+}
+
 function fmtDT(s) { return String(s || '').replace(/:\d\d$/, ''); }
 function todayStr() {
   var d = new Date();

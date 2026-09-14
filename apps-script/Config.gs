@@ -25,7 +25,8 @@ var HEADERS = {
   ],
 
   Items: [
-    'item_id', 'req_id', 'seq', 'tool_name', 'qty', 'unit', 'intended_use', 'spec_pref',
+    'item_id', 'req_id', 'seq', 'tool_name', 'qty', 'unit', 'required_date',
+    'intended_use', 'spec_pref', 'brand_pref', 'item_note',
     'benchmark_price', 'benchmark_store', 'ref_links', 'ref_photos',
     'tech_status', 'tech_note', 'decided_by', 'decided_at', 'chosen_option_id', 'pur_note',
     'fulfil_mode', 'local_est_price', 'local_store', 'tax_invoice_ok', 'receipt_url', 'receipt_at',
@@ -33,7 +34,7 @@ var HEADERS = {
   ],
 
   Options: [
-    'option_id', 'item_id', 'created_at', 'created_by', 'brand_model', 'spec', 'supplier',
+    'option_id', 'item_id', 'created_at', 'created_by', 'brand', 'model', 'spec', 'supplier',
     'product_link', 'photo_url', 'unit_price', 'vat_rate', 'vat_amount', 'shipping',
     'subtotal', 'total_cost', 'availability', 'delivery_date', 'payment_terms', 'note',
     'is_recommended', 'status'

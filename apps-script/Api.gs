@@ -67,9 +67,10 @@ function apiBootstrap() {
 /**
  * ส่งคำขอใหม่ (หลายรายการในใบเดียว)
  * payload = { requester_name, site, contact, required_date, note,
- *             items:[{tool_name, qty, unit, intended_use, spec_pref,
- *                     benchmark_price, benchmark_store, ref_links,
+ *             items:[{tool_name, qty, unit, required_date, intended_use, spec_pref,
+ *                     brand_pref, item_note, benchmark_price, benchmark_store, ref_links,
  *                     photos:[{name,mime,dataB64}]}] }
+ * required_date ของรายการย่อย ถ้าไม่ระบุจะใช้ของทั้งใบ
  */
 function apiSubmitRequest(payload) {
   payload = payload || {};
@@ -102,14 +103,17 @@ function apiSubmitRequest(payload) {
     });
 
     items.forEach(function (it, i) {
-      var itemId = reqId + '-' + (i + 1);
+      var itemId = itemIdOf_(reqId, i + 1);
       appendRow_(SHEET.ITEMS, {
         item_id: itemId, req_id: reqId, seq: i + 1,
         tool_name: str_(it.tool_name, 150),
         qty: num_(it.qty) || 1,
         unit: str_(it.unit, 20) || 'ชิ้น',
+        required_date: str_(it.required_date, 20) || str_(payload.required_date, 20),
         intended_use: str_(it.intended_use, 400),
         spec_pref: str_(it.spec_pref, 400),
+        brand_pref: str_(it.brand_pref, 150),
+        item_note: str_(it.item_note, 400),
         benchmark_price: num_(it.benchmark_price) || '',
         benchmark_store: str_(it.benchmark_store, 100),
         ref_links: str_(it.ref_links, 500),
@@ -137,7 +141,9 @@ function apiSubmitRequest(payload) {
       '',
       items.map(function (it, i) {
         return (i + 1) + '. ' + it.tool_name + ' x' + (num_(it.qty) || 1) + ' ' + (it.unit || 'ชิ้น') +
+          (it.required_date ? ('\n   ต้องการใช้: ' + it.required_date) : '') +
           (it.spec_pref ? ('\n   สเปค: ' + it.spec_pref) : '') +
+          (it.brand_pref ? ('\n   ยี่ห้อ/รุ่นที่อยากได้: ' + it.brand_pref) : '') +
           (num_(it.benchmark_price) ? ('\n   ราคาที่ช่างเห็นที่ร้าน: ' + fmtBaht_(it.benchmark_price) + ' (' + (it.benchmark_store || '-') + ')') : '');
       }).join('\n')
     ].join('\n');
@@ -190,9 +196,9 @@ function apiTechDecision(token, itemId, action, payload) {
         chosen_option_id: opt.option_id, purchase_status: P.WAITING_TECH
       });
       logHistory_(req.req_id, item.item_id, opt.option_id, by, 'TECH', 'CONFIRM_SPEC',
-        'ยืนยันสเปค: ' + opt.brand_model + ' / ' + opt.supplier + ' รวม ' + fmtBaht_(opt.total_cost) + (note ? (' | ' + note) : ''));
+        'ยืนยันสเปค: ' + brandModel_(opt) + ' / ' + opt.supplier + ' รวม ' + fmtBaht_(opt.total_cost) + (note ? (' | ' + note) : ''));
       notifyPurchasing_('ช่างยืนยันสเปคแล้ว ' + item.item_id,
-        by + ' ยืนยันสเปคของ ' + item.tool_name + '\nตัวเลือก: ' + opt.brand_model + ' (' + opt.supplier + ') รวม ' + fmtBaht_(opt.total_cost) +
+        by + ' ยืนยันสเปคของ ' + item.tool_name + '\nตัวเลือก: ' + brandModel_(opt) + ' (' + opt.supplier + ') รวม ' + fmtBaht_(opt.total_cost) +
         '\n\nหมายเหตุ: การยืนยันสเปคยังไม่ใช่การอนุมัติสั่งซื้อ — รอช่างเลือกวิธีซื้อ แล้วจัดซื้อจึงอนุมัติ',
         techLink_(req.token), req.req_id);
 
@@ -259,7 +265,8 @@ function apiChooseMode(token, itemId, mode, payload) {
       var opt = findOne_(SHEET.OPTIONS, 'option_id', item.chosen_option_id);
       patch.fulfil_mode = 'SUPPLIER';
       patch.local_est_price = ''; patch.local_store = ''; patch.tax_invoice_ok = '';
-      detail = 'ให้จัดซื้อสั่งซื้อจาก ' + (opt ? opt.supplier : '-') + ' รวม ' + fmtBaht_(opt ? opt.total_cost : 0);
+      detail = 'ให้จัดซื้อสั่งซื้อ ' + brandModel_(opt) + ' จาก ' + (opt ? opt.supplier : '-') +
+        ' รวม ' + fmtBaht_(opt ? opt.total_cost : 0);
 
     } else if (mode === 'LOCAL') {
       var est = num_(payload.local_est_price);
@@ -388,7 +395,7 @@ function apiStaffData(staffToken, opts) {
     it.requester_name = r.requester_name || '';
     it.site = r.site || '';
     it.contact = r.contact || '';
-    it.required_date = r.required_date || '';
+    it.required_date = it.required_date || r.required_date || '';
     it.req_created_at = r.created_at || '';
     it.tech_link = techLink_(r.token);
     it.line_pending = !!notifyPending[it.req_id];
@@ -418,13 +425,13 @@ function apiStaffData(staffToken, opts) {
 
 /**
  * จัดซื้อเพิ่มตัวเลือกให้รายการหนึ่ง
- * opt = { brand_model, spec, supplier, product_link, photo_url, photo:{...},
+ * opt = { brand, model, spec, supplier, product_link, photo_url, photo:{...},
  *         unit_price, vat_rate, shipping, availability, delivery_date, payment_terms, note, is_recommended }
  */
 function apiAddOption(staffToken, itemId, opt) {
   var staff = requireStaff_(staffToken);
   opt = opt || {};
-  if (!str_(opt.brand_model)) throw new Error('กรุณาระบุยี่ห้อ/รุ่น / Brand-model required');
+  if (!str_(opt.brand)) throw new Error('กรุณาระบุยี่ห้อ / Brand required');
   if (!str_(opt.supplier)) throw new Error('กรุณาระบุผู้ขาย / Supplier required');
   if (!num_(opt.unit_price)) throw new Error('กรุณาระบุราคาต่อหน่วย / Unit price required');
 
@@ -449,7 +456,7 @@ function apiAddOption(staffToken, itemId, opt) {
 
     appendRow_(SHEET.OPTIONS, {
       option_id: optionId, item_id: item.item_id, created_at: ts, created_by: staff,
-      brand_model: str_(opt.brand_model, 150), spec: str_(opt.spec, 600),
+      brand: str_(opt.brand, 100), model: str_(opt.model, 100), spec: str_(opt.spec, 600),
       supplier: str_(opt.supplier, 150), product_link: str_(opt.product_link, 500),
       photo_url: photo,
       unit_price: num_(opt.unit_price), vat_rate: vatRate, vat_amount: calc.vat,
@@ -461,12 +468,12 @@ function apiAddOption(staffToken, itemId, opt) {
 
     touchItem_(item, { tech_status: T.WAITING_TECH, purchase_status: P.WAITING_TECH });
     logHistory_(item.req_id, item.item_id, optionId, staff, 'PURCHASING', 'ADD_OPTION',
-      opt.brand_model + ' / ' + opt.supplier + ' | รวม ' + fmtBaht_(calc.total) +
+      brandModel_(opt) + ' / ' + opt.supplier + ' | รวม ' + fmtBaht_(calc.total) +
       ' | ส่ง ' + (opt.delivery_date || opt.availability || '-'));
 
     if (req) {
       notifyTechnician_(req, 'มีตัวเลือกใหม่ให้ยืนยัน — ' + item.tool_name,
-        'จัดซื้อเสนอ: ' + opt.brand_model + ' (' + opt.supplier + ')\n' +
+        'จัดซื้อเสนอ: ' + brandModel_(opt) + ' (' + opt.supplier + ')\n' +
         'ราคารวม ' + fmtBaht_(calc.total) + ' | ได้ของ ' + (opt.delivery_date || opt.availability || '-') + '\n' +
         'กรุณาตรวจสอบรูปและสเปค แล้วกดยืนยัน/ไม่ตรงสเปค');
     }
@@ -485,7 +492,7 @@ function apiWithdrawOption(staffToken, optionId) {
   if (item && String(item.chosen_option_id) === String(optionId)) {
     touchItem_(item, { chosen_option_id: '', tech_status: T.WAITING_TECH });
   }
-  logHistory_(item ? item.req_id : '', opt.item_id, optionId, staff, 'PURCHASING', 'WITHDRAW_OPTION', opt.brand_model);
+  logHistory_(item ? item.req_id : '', opt.item_id, optionId, staff, 'PURCHASING', 'WITHDRAW_OPTION', brandModel_(opt));
   return { ok: true };
 }
 

@@ -65,12 +65,22 @@ function findOne_(name, field, value) {
   return r.length ? r[0] : null;
 }
 
-/** เลขที่คำขอแบบอ่านง่าย เช่น TR-2609-0001 */
+/** เลขที่คำขอแบบอ่านง่าย เช่น REQ-2026-0001 (เลขรันเริ่มใหม่ทุกปี) */
 function nextReqId_() {
   var props = PropertiesService.getDocumentProperties();
+  var year = Utilities.formatDate(new Date(), tz_(), 'yyyy');
+  if (String(props.getProperty('SEQ_YEAR') || '') !== year) {
+    props.setProperty('SEQ_YEAR', year);
+    props.setProperty('SEQ_REQ', '0');
+  }
   var n = Number(props.getProperty('SEQ_REQ') || '0') + 1;
   props.setProperty('SEQ_REQ', String(n));
-  return 'TR-' + Utilities.formatDate(new Date(), tz_(), 'yyMM') + '-' + ('0000' + n).slice(-4);
+  return 'REQ-' + year + '-' + ('0000' + n).slice(-4);
+}
+
+/** รหัสรายการย่อย เช่น REQ-2026-0001-01 */
+function itemIdOf_(reqId, seq) {
+  return reqId + '-' + ('00' + seq).slice(-2);
 }
 
 function newToken_() {

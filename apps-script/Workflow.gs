@@ -5,7 +5,8 @@
  */
 
 var STAGE_LABEL = {
-  NEED_OPTION: 'รอจัดซื้อเสนอตัวเลือก / Waiting options',
+  NEED_OPTION: 'รอจัดซื้อเสนอตัวเลือก / Pending purchasing review',
+  CHANGE_REQ: 'ช่างขอแก้ไข/ไม่ตรงสเปค / Change requested',
   TECH_SPEC: 'รอช่างยืนยันสเปค / Waiting tech confirm',
   TECH_MODE: 'รอช่างเลือกวิธีซื้อ / Waiting buy method',
   APPROVAL: 'รออนุมัติจากจัดซื้อ / Waiting approval',
@@ -44,7 +45,8 @@ function stageOf_(item, optionCount) {
 
   // ยังอยู่ฝั่งช่าง
   if (mode) return 'APPROVAL';
-  if (!n || ts === T.REJECTED || ts === T.CHANGE_REQUESTED) return 'NEED_OPTION';
+  if (!n) return 'NEED_OPTION';
+  if (ts === T.REJECTED || ts === T.CHANGE_REQUESTED) return 'CHANGE_REQ';
   if (ts === T.CONFIRMED) return 'TECH_MODE';
   return 'TECH_SPEC';
 }
@@ -60,3 +62,9 @@ function priceCalc_(unitPrice, qty, vatRate, shipping) {
 }
 
 function round2_(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+/** ชื่อสินค้าที่ใช้แสดงผล = ยี่ห้อ + รุ่น */
+function brandModel_(o) {
+  if (!o) return '-';
+  return [str_(o.brand), str_(o.model)].filter(String).join(' ') || '-';
+}

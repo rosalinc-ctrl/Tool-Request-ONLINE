@@ -34,14 +34,14 @@
 var ST = null;            // ข้อมูลล่าสุดจากเซิร์ฟเวอร์
 var STAFF = { token: '', name: '' };
 var FILTER = '';
-var ORDER = ['NEED_OPTION', 'TECH_SPEC', 'TECH_MODE', 'APPROVAL', 'TO_ORDER', 'ORDERED', 'LOCAL_BUY', 'DONE', 'PUR_REJECTED', 'CANCELLED'];
+var ORDER = ['NEED_OPTION', 'CHANGE_REQ', 'TECH_SPEC', 'TECH_MODE', 'APPROVAL', 'TO_ORDER', 'ORDERED', 'LOCAL_BUY', 'DONE', 'PUR_REJECTED', 'CANCELLED'];
 var SHORT = {
-  NEED_OPTION: 'รอเสนอราคา', TECH_SPEC: 'รอช่างยืนยัน', TECH_MODE: 'รอเลือกวิธีซื้อ',
+  NEED_OPTION: 'รอเสนอราคา', CHANGE_REQ: 'ช่างขอแก้ไข', TECH_SPEC: 'รอช่างยืนยัน', TECH_MODE: 'รอเลือกวิธีซื้อ',
   APPROVAL: 'รออนุมัติ', TO_ORDER: 'รอสั่งซื้อ', ORDERED: 'สั่งแล้ว',
   LOCAL_BUY: 'ช่างซื้อเอง', DONE: 'เสร็จสิ้น', PUR_REJECTED: 'ไม่อนุมัติ', CANCELLED: 'ยกเลิก'
 };
 var CLS = {
-  NEED_OPTION: 'y', TECH_SPEC: 'b', TECH_MODE: 'b', APPROVAL: 'y', TO_ORDER: 'g',
+  NEED_OPTION: 'y', CHANGE_REQ: 'r', TECH_SPEC: 'b', TECH_MODE: 'b', APPROVAL: 'y', TO_ORDER: 'g',
   ORDERED: 'g', LOCAL_BUY: 'y', DONE: 'g', PUR_REJECTED: 'r', CANCELLED: 'r'
 };
 
@@ -102,9 +102,11 @@ function row(it) {
   if (it.line_pending) h.push('<div class="banner warnb small">มีข้อความรอส่งให้ช่างทาง LINE</div>');
 
   // สิ่งที่ช่างขอ
-  h.push('<details ' + (['NEED_OPTION', 'TECH_SPEC'].indexOf(it.stage) >= 0 ? 'open' : '') + '><summary>สิ่งที่ช่างขอ / Request detail</summary>');
+  h.push('<details ' + (['NEED_OPTION', 'CHANGE_REQ', 'TECH_SPEC'].indexOf(it.stage) >= 0 ? 'open' : '') + '><summary>สิ่งที่ช่างขอ / Request detail</summary>');
   if (it.intended_use) h.push(kv('ใช้ทำอะไร', esc(it.intended_use)));
-  if (it.spec_pref) h.push(kv('สเปค/ยี่ห้อ', esc(it.spec_pref)));
+  if (it.spec_pref) h.push(kv('สเปคที่ขอ', esc(it.spec_pref)));
+  if (it.brand_pref) h.push(kv('ยี่ห้อ/รุ่นที่อยากได้', '<b>' + esc(it.brand_pref) + '</b>'));
+  if (it.item_note) h.push(kv('หมายเหตุจากช่าง', esc(it.item_note)));
   if (numOf(it.benchmark_price)) h.push(kv('ราคาที่ร้าน', '<b>' + baht(it.benchmark_price) + '</b>/หน่วย (' + esc(it.benchmark_store || '-') + ') → รวม ' + baht(numOf(it.benchmark_price) * numOf(it.qty))));
   if (it.ref_links) h.push(kv('ลิงก์', '<a href="' + esc(it.ref_links) + '" target="_blank" rel="noopener">เปิด</a>'));
   if (it.contact) h.push(kv('ติดต่อช่าง', esc(it.contact)));
@@ -117,15 +119,15 @@ function row(it) {
     it.options.forEach(function (o) {
       var chosen = String(it.chosen_option_id) === String(o.option_id);
       h.push('<div class="opt' + (chosen ? ' chosen' : '') + '">' +
-        (o.photo_url ? imgTag(o.photo_url, 'thumb', o.brand_model) : '') +
-        '<div><b>' + esc(o.brand_model) + '</b> — ' + esc(o.supplier) +
+        (o.photo_url ? imgTag(o.photo_url, 'thumb', bm(o)) : '') +
+        '<div><b>' + esc(bm(o)) + '</b> — ' + esc(o.supplier) +
         (chosen ? ' <span class="chip g">ช่างยืนยัน</span>' : '') +
         (o.status === 'REJECTED' ? ' <span class="chip r">ไม่ตรงสเปค</span>' : '') +
         (o.status === 'CHANGE_REQUESTED' ? ' <span class="chip y">ขอแก้ไข</span>' : '') + '</div>' +
         '<div class="small">รวม <b>' + baht(o.total_cost) + '</b> • ' + baht(o.unit_price) + '/หน่วย + ค่าส่ง ' + baht(o.shipping) +
         ' + VAT ' + esc(o.vat_rate) + '% • ได้ของ ' + esc(o.delivery_date || o.availability || '-') +
         ' • ' + esc(o.payment_terms || '-') + '</div>' +
-        (['NEED_OPTION', 'TECH_SPEC'].indexOf(it.stage) >= 0 ?
+        (['NEED_OPTION', 'CHANGE_REQ', 'TECH_SPEC'].indexOf(it.stage) >= 0 ?
           ('<div class="btn-row"><button class="btn btn-sm btn-danger" onclick="withdraw(\'' + o.option_id + '\',this)">ถอนตัวเลือกนี้</button></div>') : '') +
         '</div>');
     });
@@ -153,7 +155,7 @@ function kv(k, v) { return '<div class="kv"><b>' + esc(k) + '</b><span>' + v + '
 
 function actions(it) {
   var h = [];
-  if (['NEED_OPTION', 'TECH_SPEC', 'TECH_MODE'].indexOf(it.stage) >= 0) {
+  if (['NEED_OPTION', 'CHANGE_REQ', 'TECH_SPEC', 'TECH_MODE'].indexOf(it.stage) >= 0) {
     h.push('<div class="btn-row"><button class="btn btn-primary" onclick="toggleBox(\'opt_' + it.item_id + '\',optionForm,\'' + it.item_id + '\')">➕ เพิ่มตัวเลือก/เสนอราคา</button></div>');
   }
   if (it.stage === 'APPROVAL') {
@@ -165,7 +167,7 @@ function actions(it) {
     } else {
       var o = it.options.filter(function (x) { return String(x.option_id) === String(it.chosen_option_id); })[0];
       total = numOf(o ? o.total_cost : 0);
-      detail = 'จัดซื้อสั่งซื้อ • ' + esc(o ? o.brand_model : '-') + ' จาก ' + esc(o ? o.supplier : '-') + ' รวม ' + baht(total);
+      detail = 'จัดซื้อสั่งซื้อ • ' + esc(bm(o)) + ' จาก ' + esc(o ? o.supplier : '-') + ' รวม ' + baht(total);
     }
     var limit = numOf(ST.config.approvalLimit);
     h.push('<div class="banner ' + (limit && total > limit ? 'warnb' : 'info') + '">' +
@@ -217,7 +219,11 @@ function optionForm(itemId) {
   var it = ST.items.filter(function (x) { return x.item_id === itemId; })[0];
   return '<div class="card" style="background:#f8fbff">' +
     '<h3>เสนอตัวเลือกสำหรับ ' + esc(it.tool_name) + ' (x' + esc(it.qty) + ')</h3>' +
-    '<label class="req">ยี่ห้อ/รุ่น <span class="en">/ Brand - model</span></label><input id="o_brand_' + itemId + '">' +
+    (it.brand_pref ? '<div class="banner info small">ช่างอยากได้: <b>' + esc(it.brand_pref) + '</b></div>' : '') +
+    '<div class="grid2">' +
+    '<div><label class="req">ยี่ห้อ <span class="en">/ Brand</span></label><input id="o_brand_' + itemId + '" placeholder="เช่น Mitutoyo"></div>' +
+    '<div><label>รุ่น <span class="en">/ Model</span></label><input id="o_model_' + itemId + '" placeholder="เช่น 2046A"></div>' +
+    '</div>' +
     '<label>สเปคสำคัญ <span class="en">/ Key specs</span></label><textarea id="o_spec_' + itemId + '" placeholder="กำลังไฟ ขนาด อุปกรณ์ที่ให้มา ระยะประกัน"></textarea>' +
     '<label class="req">ผู้ขาย/ร้าน <span class="en">/ Supplier</span></label><input id="o_sup_' + itemId + '">' +
     '<label>ลิงก์สินค้า <span class="en">/ Product link</span></label><input id="o_link_' + itemId + '">' +
@@ -242,14 +248,14 @@ function optionForm(itemId) {
 function addOption(itemId, btn) {
   var g = function (p) { var el = $('#' + p + '_' + itemId); return el ? el.value.trim() : ''; };
   var payload = {
-    brand_model: g('o_brand'), spec: g('o_spec'), supplier: g('o_sup'),
+    brand: g('o_brand'), model: g('o_model'), spec: g('o_spec'), supplier: g('o_sup'),
     product_link: g('o_link'), photo_url: g('o_photourl'),
     unit_price: numOf(g('o_price')), vat_rate: g('o_vat'), shipping: numOf(g('o_ship')),
     availability: g('o_avail'), delivery_date: g('o_deliv'), payment_terms: g('o_pay'),
     note: g('o_note'), is_recommended: $('#o_rec_' + itemId).checked
   };
-  if (!payload.brand_model || !payload.supplier || !payload.unit_price) {
-    toast('กรอก ยี่ห้อ/รุ่น, ผู้ขาย และราคาต่อหน่วย ให้ครบ', 'err'); return;
+  if (!payload.brand || !payload.supplier || !payload.unit_price) {
+    toast('กรอก ยี่ห้อ, ผู้ขาย และราคาต่อหน่วย ให้ครบ', 'err'); return;
   }
   var f = $('#o_photo_' + itemId).files[0];
   busy(btn, true, 'กำลังบันทึก...');

@@ -38,7 +38,7 @@ const res = ctx.apiSubmitRequest({
       spec_pref: '40-200 N·m', benchmark_price: 2150, benchmark_store: 'Global House' }
   ]
 });
-check('ได้เลขที่คำขอ', /^TR-\d{4}-0001$/.test(res.req_id), res.req_id);
+check('ได้เลขที่คำขอ', /^REQ-\d{4}-0001$/.test(res.req_id), res.req_id);
 check('ได้ลิงก์ token', /\?p=r&t=[0-9a-f]{16}$/.test(res.url), res.url);
 check('อัปโหลดรูปเข้า Drive 1 ไฟล์', Object.keys(FILES).length === 1);
 check('ส่งอีเมลแจ้งจัดซื้อ', MAIL.length === 1 && /ใบขอซื้อใหม่/.test(MAIL[0].subject));
@@ -47,7 +47,7 @@ check('อีเมลมีราคาที่ช่างเห็นที�
 let dto = ctx.apiGetRequest(res.token);
 check('DTO มี 2 รายการ', dto.items.length === 2);
 check('สถานะเริ่มต้น = รอเสนอราคา', dto.items[0].stage === 'NEED_OPTION', dto.items[0].stage);
-check('item_id อ่านง่าย', dto.items[1].item_id === res.req_id + '-2', dto.items[1].item_id);
+check('item_id อ่านง่าย', dto.items[1].item_id === res.req_id + '-02', dto.items[1].item_id);
 
 section('2) จัดซื้อเข้าระบบและเสนอตัวเลือก');
 let bad = null; try { ctx.apiStaffData('ปลอม', {}); } catch (e) { bad = e.message; }
@@ -57,16 +57,16 @@ check('PIN ผิดเข้าไม่ได้', /รหัสไม่ถ�
 const staff = ctx.apiStaffLogin('2468', 'คุณแนน (จัดซื้อ)');
 check('เข้าสู่ระบบได้', !!staff.token);
 
-const it1 = res.req_id + '-1', it2 = res.req_id + '-2';
+const it1 = res.req_id + '-01', it2 = res.req_id + '-02';
 const o1 = ctx.apiAddOption(staff.token, it1, {
-  brand_model: 'Bosch GBH 2-26 DRE', spec: 'SDS-Plus 800W 2.7J พร้อมกล่อง', supplier: 'ร้านเครื่องมือ ก.การช่าง',
+  brand: 'Bosch', model: 'GBH 2-26 DRE', spec: 'SDS-Plus 800W 2.7J พร้อมกล่อง', supplier: 'ร้านเครื่องมือ ก.การช่าง',
   unit_price: 5200, vat_rate: 7, shipping: 150, availability: 'มีของ', delivery_date: '2026-09-18',
   payment_terms: 'เครดิต 30 วัน', is_recommended: true,
   photo: { name: 'bosch.jpg', mime: 'image/jpeg', dataB64: tinyJpgB64 }
 });
 check('คำนวณราคารวมถูกต้อง (5200+150)*1.07', Math.abs(o1.total - 5724.5) < 0.001, o1.total);
 ctx.apiAddOption(staff.token, it2, {
-  brand_model: 'Tone T4MN200', spec: '40-200 N·m มีใบสอบเทียบ', supplier: 'ไทยทูลส์',
+  brand: 'Tone', model: 'T4MN200', spec: '40-200 N·m มีใบสอบเทียบ', supplier: 'ไทยทูลส์',
   unit_price: 2600, vat_rate: 7, shipping: 0, availability: 'สั่งผลิต 7 วัน',
   delivery_date: '2026-09-24', payment_terms: 'โอนก่อนส่ง'
 });
@@ -89,7 +89,7 @@ let noReason = null;
 try { ctx.apiTechDecision(res.token, it2, 'REJECT', { by: 'ช่างสมชาย ใจดี', note: '' }); } catch (e) { noReason = e.message; }
 check('ปฏิเสธต้องมีเหตุผล', /เหตุผล/.test(noReason || ''));
 dto = ctx.apiTechDecision(res.token, it2, 'REJECT', { by: 'ช่างวิชัย แก้วมณี', option_id: dto.items[1].options[0].option_id, note: 'ช่วงทอร์คไม่พอ ต้องการถึง 300 N·m' });
-check('ปฏิเสธแล้วกลับไปรอเสนอใหม่', dto.items[1].stage === 'NEED_OPTION', dto.items[1].stage);
+check('ปฏิเสธแล้วเข้าหมวดช่างขอแก้ไข', dto.items[1].stage === 'CHANGE_REQ', dto.items[1].stage);
 check('ตัวเลือกถูกตีกลับ', dto.items[1].options[0].status === 'REJECTED');
 
 section('4) เลือกวิธีซื้อ + ขั้นอนุมัติแยกต่างหาก');
@@ -101,7 +101,7 @@ try { ctx.apiTechDecision(res.token, it1, 'CONFIRM', { by: 'ช่างสม�
 check('ส่งอนุมัติแล้วช่างแก้เองไม่ได้', /ส่งให้จัดซื้อดำเนินการแล้ว/.test(lockErr || ''), lockErr);
 
 const o2b = ctx.apiAddOption(staff.token, it2, {
-  brand_model: 'Tohnichi QL280N', spec: '60-280 N·m', supplier: 'ไทยทูลส์',
+  brand: 'Tohnichi', model: 'QL280N', spec: '60-280 N·m', supplier: 'ไทยทูลส์',
   unit_price: 3400, vat_rate: 7, shipping: 0, availability: 'มีของ', delivery_date: '2026-09-20', payment_terms: 'เครดิต 30 วัน'
 });
 let needConfirm = null;
@@ -170,8 +170,8 @@ check('มีงานค้าง -> ส่งสรุปรายวัน', 
 check('สรุปมีชื่อขั้นตอนภาษาไทย', /รอจัดซื้อเสนอตัวเลือก/.test(MAIL[MAIL.length - 1].body));
 
 section('8) กรณีพิเศษ');
-const it3 = r2.req_id + '-1';
-const o3 = ctx.apiAddOption(staff.token, it3, { brand_model: 'Makita GA4030', supplier: 'ไทยทูลส์', unit_price: 1450, vat_rate: 7, shipping: 200 });
+const it3 = r2.req_id + '-01';
+const o3 = ctx.apiAddOption(staff.token, it3, { brand: 'Makita', model: 'GA4030', supplier: 'ไทยทูลส์', unit_price: 1450, vat_rate: 7, shipping: 200 });
 check('ค่าส่งถูกคิด VAT ด้วย ((1450*3)+200)*1.07', Math.abs(o3.total - 4868.5) < 0.001, o3.total);
 ctx.apiSetPurNote(staff.token, it3, 'ที่ Global House ถูกกว่า แนะนำให้ช่างซื้อเองแล้วเบิกคืน');
 let d2 = ctx.apiGetRequest(r2.token);
@@ -194,7 +194,7 @@ let twice = null;
 try { ctx.apiApprove(staff.token, it3, true, '', ''); } catch (e) { twice = e.message; }
 check('อนุมัติซ้ำไม่ได้', /รออนุมัติ/.test(twice || ''), twice);
 let afterApprove = null;
-try { ctx.apiAddOption(staff.token, it1, { brand_model: 'x', supplier: 'y', unit_price: 1 }); } catch (e) { afterApprove = e.message; }
+try { ctx.apiAddOption(staff.token, it1, { brand: 'x', supplier: 'y', unit_price: 1 }); } catch (e) { afterApprove = e.message; }
 check('ปิดงานแล้วเพิ่มตัวเลือกไม่ได้', /อนุมัติ\/ปิดงานแล้ว/.test(afterApprove || ''), afterApprove);
 let badToken = null;
 try { ctx.apiGetRequest('0000000000000000'); } catch (e) { badToken = e.message; }
@@ -205,7 +205,53 @@ check('ใช้ token ใบหนึ่งไปแก้อีกใบไม
 let badFile = null;
 try { ctx.saveUpload_({ name: 'x.exe', mime: 'application/x-msdownload', dataB64: tinyJpgB64 }, 'x'); } catch (e) { badFile = e.message; }
 check('อัปโหลดไฟล์นอกเหนือรูป/PDF ไม่ได้', /รูปภาพและไฟล์ PDF/.test(badFile || ''));
-check('ข้อมูลในชีต Items ครบทุกคอลัมน์', ctx.readAll_('Items')[0] && Object.keys(ctx.readAll_('Items')[0]).length === 31);
+check('ข้อมูลในชีต Items ครบทุกคอลัมน์',
+  ctx.readAll_('Items')[0] && Object.keys(ctx.readAll_('Items')[0]).length === ctx.HEADERS.Items.length + 1,
+  Object.keys(ctx.readAll_('Items')[0] || {}).length + ' vs ' + (ctx.HEADERS.Items.length + 1));
+
+section('9) ข้อมูลรายทูล + หมวดช่างขอแก้ไข');
+const r3 = ctx.apiSubmitRequest({
+  requester_name: 'ช่างวิชัย แก้วมณี', required_date: '2026-11-30',
+  items: [
+    { tool_name: 'ไดอัลเกจ', qty: 1, unit: 'ตัว', required_date: '2026-11-05',
+      intended_use: 'วัดความเยื้องศูนย์เพลา', spec_pref: '0-10 มม. ละเอียด 0.01 มม.',
+      brand_pref: 'Mitutoyo 2046A หรือเทียบเท่า', item_note: 'ตัวเดิมเข็มค้าง',
+      benchmark_price: 1650, benchmark_store: 'ร้านฮาร์ดแวร์ในตลาด' },
+    { tool_name: 'ตลับเมตร 5 ม.', qty: 3, unit: 'อัน', intended_use: 'งานวัดทั่วไป' }
+  ]
+});
+const it5 = r3.req_id + '-01', it6 = r3.req_id + '-02';
+let d3 = ctx.apiGetRequest(r3.token);
+check('เก็บวันที่ต้องการใช้รายทูล', d3.items[0].required_date === '2026-11-05', d3.items[0].required_date);
+check('รายการที่ไม่ระบุวันที่ ใช้วันที่ของทั้งใบ', d3.items[1].required_date === '2026-11-30', d3.items[1].required_date);
+check('เก็บยี่ห้อ/รุ่นที่อยากได้แยกจากสเปค',
+  d3.items[0].brand_pref === 'Mitutoyo 2046A หรือเทียบเท่า' && d3.items[0].spec_pref === '0-10 มม. ละเอียด 0.01 มม.',
+  d3.items[0].brand_pref);
+check('เก็บหมายเหตุรายทูล', d3.items[0].item_note === 'ตัวเดิมเข็มค้าง', d3.items[0].item_note);
+check('อีเมลแจ้งจัดซื้อมียี่ห้อที่ช่างอยากได้', /Mitutoyo 2046A/.test(MAIL[MAIL.length - 1].body));
+
+const o5 = ctx.apiAddOption(staff.token, it5, {
+  brand: 'Mitutoyo', model: '2046S', spec: '0-10 มม. อ่าน 0.01 มม.', supplier: 'ไทยทูลส์',
+  unit_price: 1850, vat_rate: 7, shipping: 0, delivery_date: '2026-11-03', payment_terms: 'เครดิต 30 วัน'
+});
+const optRow5 = ctx.findOne_('Options', 'option_id', o5.option_id);
+check('เก็บยี่ห้อและรุ่นแยกคอลัมน์', optRow5.brand === 'Mitutoyo' && optRow5.model === '2046S');
+check('ชื่อแสดงผล = ยี่ห้อ + รุ่น', ctx.brandModel_(optRow5) === 'Mitutoyo 2046S', ctx.brandModel_(optRow5));
+let noBrand = null;
+try { ctx.apiAddOption(staff.token, it6, { model: 'X', supplier: 'y', unit_price: 1 }); } catch (e) { noBrand = e.message; }
+check('ไม่ใส่ยี่ห้อเสนอไม่ได้', /ยี่ห้อ/.test(noBrand || ''), noBrand);
+
+ctx.apiTechDecision(r3.token, it5, 'CHANGE', { by: 'ช่างวิชัย แก้วมณี', option_id: o5.option_id, note: 'ขอแบบมีขาแม่เหล็กด้วย' });
+d3 = ctx.apiGetRequest(r3.token);
+check('ขอแก้ไข -> หมวด CHANGE_REQ', d3.items[0].stage === 'CHANGE_REQ', d3.items[0].stage);
+const board = ctx.apiStaffData(staff.token, {});
+check('แดชบอร์ดนับหมวดช่างขอแก้ไขแยกจากรอเสนอราคา', board.counts.CHANGE_REQ >= 1 && board.counts.NEED_OPTION >= 1,
+  JSON.stringify(board.counts));
+check('หมวดช่างขอแก้ไขมีชื่อไทย/อังกฤษ', /Change requested/.test(board.stageLabels.CHANGE_REQ), board.stageLabels.CHANGE_REQ);
+const onlyChange = ctx.apiStaffData(staff.token, { stage: 'CHANGE_REQ' });
+check('กรองเฉพาะหมวดช่างขอแก้ไขได้', onlyChange.items.every(i => i.stage === 'CHANGE_REQ') && onlyChange.items.length >= 1);
+check('การ์ดจัดซื้อเห็นเหตุผลที่ช่างขอแก้ไข',
+  /ขาแม่เหล็ก/.test((onlyChange.items.filter(i => i.item_id === it5)[0] || {}).tech_note || ''));
 
 console.log('\n----------------------------------------');
 console.log('ผ่าน ' + pass + ' / ล้มเหลว ' + fail);

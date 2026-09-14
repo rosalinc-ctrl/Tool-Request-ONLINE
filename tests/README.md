@@ -4,8 +4,8 @@
 โดยจำลอง (mock) บริการของ Google Apps Script ด้วย Node.js
 
 ```bash
-node tests/run.js          # ทดสอบ workflow ทั้งหมดฝั่งเซิร์ฟเวอร์ (64 เคส)
-node tests/client-test.js  # ทดสอบการ render ของทั้ง 3 หน้า (26 เคส)
+node tests/run.js          # ทดสอบ workflow ทั้งหมดฝั่งเซิร์ฟเวอร์ (77 เคส)
+node tests/client-test.js  # ทดสอบการ render ของทั้ง 3 หน้า (35 เคส)
 ```
 
 ต้องมี Node.js 18 ขึ้นไป ไม่ต้องติดตั้ง package ใดๆ

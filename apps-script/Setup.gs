@@ -113,14 +113,19 @@ function menuDemoData() {
       {
         tool_name: 'สว่านโรตารี่ 26 มม.', qty: 1, unit: 'ตัว',
         intended_use: 'เจาะปูนติดตั้งแป้นเครื่องจักร ไลน์ 3',
-        spec_pref: 'ยี่ห้อ Bosch หรือ Makita, SDS-Plus, 800W ขึ้นไป',
+        spec_pref: 'SDS-Plus, 800W ขึ้นไป, แรงกระแทก 2.5J ขึ้นไป',
+        brand_pref: 'Bosch GBH 2-26 หรือ Makita เทียบเท่า',
+        item_note: 'ตัวเดิมหัวจับหลวม ใช้ไม่ได้แล้ว',
         benchmark_price: 4890, benchmark_store: 'Global House (โกลบอลเฮ้าส์)',
         ref_links: ''
       },
       {
         tool_name: 'ประแจทอร์ค 1/2 นิ้ว', qty: 2, unit: 'ตัว',
+        required_date: Utilities.formatDate(new Date(Date.now() + 14 * 86400000), tz_(), 'yyyy-MM-dd'),
         intended_use: 'ขันโบลต์หน้าแปลนตามค่าทอร์ค',
         spec_pref: '40-200 N·m มีใบรับรองการสอบเทียบ',
+        brand_pref: '',
+        item_note: 'ใช้คู่กับงาน PM เดือนหน้า',
         benchmark_price: 2150, benchmark_store: 'Global House (โกลบอลเฮ้าส์)',
         ref_links: ''
       }
