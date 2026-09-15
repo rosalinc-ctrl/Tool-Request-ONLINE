@@ -103,7 +103,7 @@ function groupCard(g) {
   if (g.approvable > 0) {
     var over = ST.config.approvalLimit && g.total > ST.config.approvalLimit;
     h.push('<div class="banner ' + (over ? 'warnb' : 'info') + '">' +
-      '<b>ยอดรวมตามที่จัดซื้อแนะนำ: ' + baht(g.total) + '</b>' +
+      '<b>ยอดรวมตามที่จัดซื้อแนะนำ: <span style="white-space:nowrap">' + baht(g.total) + '</span></b>' +
       (over ? '<br>⚠️ เกินวงเงิน ' + baht(ST.config.approvalLimit) + ' — ตรวจให้ละเอียดก่อนอนุมัติ' : '') +
       '</div>');
   }
@@ -164,7 +164,7 @@ function itemBlock(it) {
       '<b>' + esc(o.supplier) + '</b> — ' + esc(bm(o)) +
       (o.source === 'TECH' ? ' <span class="chip y">🏪 ราคาที่ช่างไปดูมา</span>' : '') +
       (rec ? ' <span class="chip b">★ จัดซื้อแนะนำ</span>' : '') +
-      '</div><div class="price" style="font-size:16px">' + baht(o.total_cost) + '</div></div>' +
+      '</div><div class="price" style="font-size:16px;white-space:nowrap">' + baht(o.total_cost) + '</div></div>' +
       '<div class="small">' + baht(o.unit_price) + '/' + esc(it.unit) + ' + ส่ง ' + baht(o.shipping) +
       ' + VAT ' + esc(o.vat_rate) + '%' +
       (diff > 0 ? (' <span class="chip r">แพงกว่าถูกสุด ' + baht(diff) + '</span>') : (it.options.length > 1 ? ' <span class="chip g">ถูกที่สุด</span>' : '')) +
