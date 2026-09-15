@@ -6,6 +6,7 @@
  *   ?p=r&t=TOKEN   -> หน้าติดตาม/ยืนยันของช่าง
  *   ?p=find        -> ค้นหาคำขอของฉัน (กรณีลิงก์หายใน LINE)
  *   ?p=dash        -> หน้าจัดซื้อ (ใส่ PIN)
+ *   ?p=mgr         -> หน้าผู้บริหารอนุมัติ (ใส่ PIN คนละตัว)
  */
 
 function doGet(e) {
@@ -20,6 +21,7 @@ function doGet(e) {
       return render_('Page_Tech', 'ติดตามคำขอ ' + req.req_id, { token: token });
     }
     if (page === 'dash') return render_('Page_Dash', 'จัดซื้อ — Tool Request', {});
+    if (page === 'mgr') return render_('Page_Mgr', 'อนุมัติสั่งซื้อ — Tool Request', {});
     if (page === 'find') return render_('Page_Find', 'ค้นหาคำขอของฉัน', {});
     return render_('Page_New', 'ขอซื้อเครื่องมือ — Meiwa', { config: publicCfg_(), technicians: activeTechs_() });
   } catch (err) {

@@ -6,19 +6,19 @@
 </header>
 
 <div class="wrap">
-  <!-- login -->
   <div id="login" class="card">
     <h3>เข้าสู่ระบบจัดซื้อ</h3>
     <label>ชื่อผู้ใช้งาน <span class="en">/ Your name</span></label>
     <input id="l_name" placeholder="เช่น คุณแนน (จัดซื้อ)">
     <label class="req">PIN</label>
-    <input id="l_pin" type="password" inputmode="numeric" placeholder="รหัสจากชีต Config">
+    <input id="l_pin" type="password" inputmode="numeric" placeholder="รหัสจากชีต Config (STAFF_PIN)">
     <div class="btn-row"><button class="btn btn-primary" id="l_btn">เข้าสู่ระบบ</button></div>
+    <div class="muted small">หน้าอนุมัติของผู้บริหารอยู่ที่ <code>?p=mgr</code> (คนละ PIN)</div>
   </div>
 
   <div id="main" class="hide">
     <div class="tabs" id="tabs"></div>
-    <input id="q" placeholder="🔎 ค้นหา: ชื่อเครื่องมือ / ชื่อช่าง / เลขที่รายการ" style="margin:6px 0">
+    <input id="q" placeholder="🔎 ค้นหา: ชื่อเครื่องมือ / ชื่อช่าง / รหัสพนักงาน / เลขที่รายการ" style="margin:6px 0">
     <div class="muted small" id="summary"></div>
     <div id="list"></div>
   </div>
@@ -31,39 +31,40 @@
 
 <?!= include('ClientLib'); ?>
 <script>
-var ST = null;            // ข้อมูลล่าสุดจากเซิร์ฟเวอร์
+var ST = null;
 var STAFF = { token: '', name: '' };
 var FILTER = '';
-var ORDER = ['NEED_OPTION', 'CHANGE_REQ', 'TECH_SPEC', 'TECH_MODE', 'APPROVAL', 'TO_ORDER', 'ORDERED', 'LOCAL_BUY', 'DONE', 'PUR_REJECTED', 'CANCELLED'];
+var openBox = {};
+
+var ORDER = ['NEED_SPEC', 'SPEC_CHANGE', 'TECH_SPEC', 'QUOTING', 'APPROVAL', 'TO_PO', 'ORDERED', 'LOCAL_BUY', 'DONE', 'MGR_REJECTED', 'CANCELLED'];
 var SHORT = {
-  NEED_OPTION: 'รอเสนอราคา', CHANGE_REQ: 'ช่างขอแก้ไข', TECH_SPEC: 'รอช่างยืนยัน', TECH_MODE: 'รอเลือกวิธีซื้อ',
-  APPROVAL: 'รออนุมัติ', TO_ORDER: 'รอสั่งซื้อ', ORDERED: 'สั่งแล้ว',
-  LOCAL_BUY: 'ช่างซื้อเอง', DONE: 'เสร็จสิ้น', PUR_REJECTED: 'ไม่อนุมัติ', CANCELLED: 'ยกเลิก'
+  NEED_SPEC: 'ร่างสเปค', SPEC_CHANGE: 'ช่างขอแก้สเปค', TECH_SPEC: 'รอช่างตรวจสเปค',
+  QUOTING: 'เทียบราคา', APPROVAL: 'รอผู้บริหาร', TO_PO: 'รอเปิด PO', ORDERED: 'เปิด PO แล้ว',
+  LOCAL_BUY: 'ช่างซื้อเอง', DONE: 'เสร็จสิ้น', MGR_REJECTED: 'ไม่อนุมัติ', CANCELLED: 'ยกเลิก'
 };
 var CLS = {
-  NEED_OPTION: 'y', CHANGE_REQ: 'r', TECH_SPEC: 'b', TECH_MODE: 'b', APPROVAL: 'y', TO_ORDER: 'g',
-  ORDERED: 'g', LOCAL_BUY: 'y', DONE: 'g', PUR_REJECTED: 'r', CANCELLED: 'r'
+  NEED_SPEC: 'y', SPEC_CHANGE: 'r', TECH_SPEC: 'b', QUOTING: 'y', APPROVAL: 'b',
+  TO_PO: 'g', ORDERED: 'g', LOCAL_BUY: 'y', DONE: 'g', MGR_REJECTED: 'r', CANCELLED: 'r'
 };
 
 function login() {
   var btn = $('#l_btn');
   busy(btn, true, 'กำลังเข้าสู่ระบบ...');
-  api('apiStaffLogin', $('#l_pin').value, $('#l_name').value).then(function (r) {
-    busy(btn, false);
-    STAFF = r;
-    lsSet('staff_name', r.name);
-    $('#login').classList.add('hide');
-    $('#main').classList.remove('hide');
-    $('#h_sub').textContent = 'ผู้ใช้งาน: ' + r.name;
-    refresh();
-  }).catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+  api('apiStaffLogin', $('#l_pin').value, $('#l_name').value.trim())
+    .then(function (s) {
+      STAFF = s; busy(btn, false);
+      lsSet('staff_name', s.name);
+      $('#login').classList.add('hide');
+      $('#main').classList.remove('hide');
+      refresh(false);
+    })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
 }
 
 function refresh(quiet) {
   return api('apiStaffData', STAFF.token, { stage: FILTER, q: $('#q').value.trim() })
     .then(function (d) {
-      ST = d;
-      render();
+      ST = d; render();
       if (!quiet) toast('อัปเดตแล้ว', 'ok');
     })
     .catch(function (e) {
@@ -76,72 +77,56 @@ function refresh(quiet) {
 }
 
 function render() {
+  $('#h_sub').textContent = STAFF.name + ' • ' + ST.total + ' รายการในมุมมองนี้';
   $('#tabs').innerHTML =
     '<span class="chip ' + (FILTER === '' ? 'sel' : '') + '" onclick="setFilter(\'\')">ทั้งหมด</span>' +
     ORDER.map(function (s) {
       var n = ST.counts[s] || 0;
-      if (!n && ['DONE', 'PUR_REJECTED', 'CANCELLED'].indexOf(s) >= 0) return '';
+      if (!n && ['DONE', 'MGR_REJECTED', 'CANCELLED'].indexOf(s) >= 0) return '';
       return '<span class="chip ' + (CLS[s] || '') + ' ' + (FILTER === s ? 'sel' : '') +
         '" onclick="setFilter(\'' + s + '\')">' + SHORT[s] + ' ' + n + '</span>';
     }).join('');
   $('#summary').textContent = 'แสดง ' + ST.items.length + ' รายการ' + (FILTER ? (' • ' + SHORT[FILTER]) : '');
-  $('#list').innerHTML = ST.items.map(row).join('') ||
-    '<div class="card muted">ไม่มีรายการในหมวดนี้</div>';
+  $('#list').innerHTML = ST.items.map(row).join('') || '<div class="card muted">ไม่มีรายการในหมวดนี้</div>';
+  Object.keys(openBox).forEach(function (id) {
+    if (openBox[id]) toggleBox(openBox[id].key, openBox[id].fn, id, true);
+  });
 }
 
 function setFilter(s) { FILTER = s; refresh(true); }
+function kv(k, v) { return '<div class="kv"><b>' + esc(k) + '</b><span>' + v + '</span></div>'; }
 
 function row(it) {
   var h = [];
   h.push('<div class="card">');
-  h.push('<div class="item-head"><div><h3 style="margin:0">' + esc(it.tool_name) + ' <span class="muted small">x' + esc(it.qty) + ' ' + esc(it.unit) + '</span></h3>' +
-    '<div class="muted small">' + esc(it.item_id) + ' • ' + esc(it.requester_name) + (it.site ? (' (' + esc(it.site) + ')') : '') +
+  h.push('<div class="item-head"><div><h3 style="margin:0">' + esc(it.tool_name) +
+    ' <span class="muted small">x' + esc(it.qty) + ' ' + esc(it.unit) + '</span></h3>' +
+    '<div class="muted small">' + esc(it.item_id) + ' • ' + esc(it.requester_name) +
+    ' (' + esc(it.emp_code || '-') + ')' + (it.site ? (' • ' + esc(it.site)) : '') +
     ' • ต้องการใช้ ' + esc(it.required_date || '-') + '</div></div>' +
     '<span class="chip ' + (CLS[it.stage] || '') + '">' + SHORT[it.stage] + '</span></div>');
 
   if (it.line_pending) h.push('<div class="banner warnb small">มีข้อความรอส่งให้ช่างทาง LINE</div>');
 
   // สิ่งที่ช่างขอ
-  h.push('<details ' + (['NEED_OPTION', 'CHANGE_REQ', 'TECH_SPEC'].indexOf(it.stage) >= 0 ? 'open' : '') + '><summary>สิ่งที่ช่างขอ / Request detail</summary>');
+  h.push('<details ' + (['NEED_SPEC', 'SPEC_CHANGE'].indexOf(it.stage) >= 0 ? 'open' : '') +
+    '><summary>สิ่งที่ช่างขอ / Request detail</summary>');
   if (it.intended_use) h.push(kv('ใช้ทำอะไร', esc(it.intended_use)));
   if (it.spec_pref) h.push(kv('สเปคที่ขอ', esc(it.spec_pref)));
   if (it.brand_pref) h.push(kv('ยี่ห้อ/รุ่นที่อยากได้', '<b>' + esc(it.brand_pref) + '</b>'));
   if (it.item_note) h.push(kv('หมายเหตุจากช่าง', esc(it.item_note)));
-  if (numOf(it.benchmark_price)) h.push(kv('ราคาที่ร้าน', '<b>' + baht(it.benchmark_price) + '</b>/หน่วย (' + esc(it.benchmark_store || '-') + ') → รวม ' + baht(numOf(it.benchmark_price) * numOf(it.qty))));
   if (it.ref_links) h.push(kv('ลิงก์', '<a href="' + esc(it.ref_links) + '" target="_blank" rel="noopener">เปิด</a>'));
   if (it.contact) h.push(kv('ติดต่อช่าง', esc(it.contact)));
   if (it.photos.length) h.push('<div class="thumbs">' + it.photos.map(function (p) { return imgTag(p, 'thumb', 'รูปจากช่าง'); }).join('') + '</div>');
   h.push('</details>');
 
-  // ตัวเลือกที่เสนอไปแล้ว
-  if (it.options.length) {
-    h.push('<details open><summary>ตัวเลือกที่เสนอ (' + it.options.length + ')</summary>');
-    it.options.forEach(function (o) {
-      var chosen = String(it.chosen_option_id) === String(o.option_id);
-      h.push('<div class="opt' + (chosen ? ' chosen' : '') + '">' +
-        (o.photo_url ? imgTag(o.photo_url, 'thumb', bm(o)) : '') +
-        '<div><b>' + esc(bm(o)) + '</b> — ' + esc(o.supplier) +
-        (chosen ? ' <span class="chip g">ช่างยืนยัน</span>' : '') +
-        (o.status === 'REJECTED' ? ' <span class="chip r">ไม่ตรงสเปค</span>' : '') +
-        (o.status === 'CHANGE_REQUESTED' ? ' <span class="chip y">ขอแก้ไข</span>' : '') + '</div>' +
-        '<div class="small">รวม <b>' + baht(o.total_cost) + '</b> • ' + baht(o.unit_price) + '/หน่วย + ค่าส่ง ' + baht(o.shipping) +
-        ' + VAT ' + esc(o.vat_rate) + '% • ได้ของ ' + esc(o.delivery_date || o.availability || '-') +
-        ' • ' + esc(o.payment_terms || '-') + '</div>' +
-        (['NEED_OPTION', 'CHANGE_REQ', 'TECH_SPEC'].indexOf(it.stage) >= 0 ?
-          ('<div class="btn-row"><button class="btn btn-sm btn-danger" onclick="withdraw(\'' + o.option_id + '\',this)">ถอนตัวเลือกนี้</button></div>') : '') +
-        '</div>');
-    });
-    h.push('</details>');
-  }
-
-  if (it.tech_note) h.push('<div class="banner info small"><b>ช่างบันทึกไว้:</b> ' + esc(it.tech_note) +
-    (it.decided_by ? (' — ' + esc(it.decided_by) + ' ' + fmtDT(it.decided_at)) : '') + '</div>');
-  if (it.pur_note) h.push('<div class="banner info small"><b>ข้อความถึงช่าง:</b> ' + esc(it.pur_note) + '</div>');
-
+  h.push(specBlock(it));
+  h.push(benchBlock(it));
+  h.push(quoteBlock(it));
   h.push(actions(it));
 
   h.push('<div class="btn-row">' +
-    '<button class="btn btn-sm" onclick="toggleBox(\'note_' + it.item_id + '\',noteForm,\'' + it.item_id + '\')">💬 ส่งข้อความถึงช่าง</button>' +
+    '<button class="btn btn-sm" onclick="toggleBox(\'note_' + it.item_id + '\',noteForm,\'' + it.item_id + '\')">💬 ข้อความถึงช่าง</button>' +
     '<button class="btn btn-sm" onclick="lineMsg(\'' + it.req_id + '\')">📱 ข้อความ LINE</button>' +
     '<a class="btn btn-sm" href="' + esc(it.tech_link) + '" target="_blank" rel="noopener">🔗 หน้าช่าง</a>' +
     '<button class="btn btn-sm" onclick="hist(\'' + it.item_id + '\')">🕘 ประวัติ</button>' +
@@ -151,128 +136,291 @@ function row(it) {
   return h.join('');
 }
 
-function kv(k, v) { return '<div class="kv"><b>' + esc(k) + '</b><span>' + v + '</span></div>'; }
+/* ---------- สเปคอ้างอิงที่ส่งให้ช่างตรวจ ---------- */
+function specBlock(it) {
+  var h = [];
+  h.push('<div class="sec-title">1. สเปคที่ให้ช่างตรวจ <span class="muted small">/ Spec check</span></div>');
+  if (!it.hasSpec) {
+    h.push('<div class="banner warnb small">ยังไม่ได้ส่งสเปคให้ช่าง — ต้องให้ช่างยืนยันสเปคก่อน จึงจะเทียบราคาได้</div>');
+  } else {
+    var st = it.tech_status;
+    h.push('<div class="opt' + (st === 'CONFIRMED' ? ' chosen' : '') + '">' +
+      (it.spec_photo ? imgTag(it.spec_photo, 'thumb', 'สเปค') : '') +
+      '<div><b>' + esc([it.spec_brand, it.spec_model].filter(Boolean).join(' ') || '-') + '</b> ' +
+      (st === 'CONFIRMED' ? '<span class="chip g">ช่างยืนยันแล้ว</span>' :
+       st === 'WAITING' ? '<span class="chip b">รอช่างตรวจ</span>' :
+       st === 'CHANGE' ? '<span class="chip y">ช่างขอแก้</span>' :
+       st === 'REJECTED' ? '<span class="chip r">ช่างว่าใช้ไม่ได้</span>' : '') + '</div>' +
+      (it.spec_detail ? '<div class="small" style="white-space:pre-wrap;margin-top:4px">' + esc(it.spec_detail) + '</div>' : '') +
+      (it.spec_link ? '<div class="small"><a href="' + esc(it.spec_link) + '" target="_blank" rel="noopener">ดูหน้าสินค้า</a></div>' : '') +
+      '</div>');
+    if (it.tech_note) {
+      h.push('<div class="banner ' + (it.tech_status === 'CONFIRMED' ? 'okb' : 'warnb') + ' small"><b>ช่างบันทึกไว้:</b> ' +
+        esc(it.tech_note) + ' — ' + esc(it.tech_by || '-') + ' ' + fmtDT(it.tech_at) + '</div>');
+    }
+  }
+  if (['NEED_SPEC', 'SPEC_CHANGE', 'TECH_SPEC'].indexOf(it.stage) >= 0) {
+    h.push('<div class="btn-row"><button class="btn btn-primary" onclick="toggleBox(\'spec_' + it.item_id + '\',specForm,\'' + it.item_id + '\')">' +
+      (it.hasSpec ? '✏️ แก้สเปคแล้วส่งใหม่' : '📤 ส่งสเปคให้ช่างตรวจ') + '</button></div>');
+  }
+  return h.join('');
+}
 
+/* ---------- ราคาที่ช่างไปดูมาเอง ---------- */
+function benchBlock(it) {
+  if (!numOf(it.bench_price)) return '';
+  var already = it.options.filter(function (o) { return o.source === 'TECH'; }).length > 0;
+  var h = [];
+  h.push('<div class="banner okb small"><b>🏪 ราคาที่ช่างไปดูมาเอง:</b> ' + baht(it.bench_price) + '/' + esc(it.unit) +
+    ' ที่ ' + esc(it.bench_store || '-') +
+    (it.bench_note ? ('<br>' + esc(it.bench_note)) : '') +
+    '<br><span class="muted">' + esc(it.bench_by || '-') + ' ' + fmtDT(it.bench_at) + '</span>' +
+    (it.bench_photo ? ('<div class="thumbs">' + imgTag(it.bench_photo, 'thumb', 'รูปจากร้าน') + '</div>') : '') +
+    '</div>');
+  if (!already && it.tech_status === 'CONFIRMED' && ['QUOTING', 'TECH_SPEC'].indexOf(it.stage) >= 0) {
+    h.push('<div class="btn-row"><button class="btn btn-sm" onclick="useTechPrice(\'' + it.item_id + '\',this)">➕ ใช้ราคานี้เป็น 1 เจ้าในตารางเทียบ</button></div>');
+  }
+  return h.join('');
+}
+
+/* ---------- ตารางเทียบราคา ---------- */
+function quoteBlock(it) {
+  var h = [];
+  if (it.tech_status !== 'CONFIRMED' && !it.options.length) return '';
+  h.push('<div class="sec-title">2. เทียบราคา <span class="muted small">/ Quotes ' +
+    it.quote.count + '/' + it.quote.min + ' เจ้า</span></div>');
+
+  if (!it.quote.ok) {
+    h.push('<div class="banner warnb small">ต้องเทียบให้ครบ <b>' + it.quote.min + ' เจ้า</b> ก่อนส่งผู้บริหาร — ขาดอีก ' +
+      it.quote.missing + ' เจ้า' + (it.quote.hasTechPrice ? ' (นับราคาที่ช่างไปดูมาแล้ว 1 เจ้า)' : '') + '</div>');
+  }
+
+  it.options.forEach(function (o) {
+    var rec = String(it.recommend_option_id) === String(o.option_id);
+    var app = String(it.approved_option_id) === String(o.option_id);
+    h.push('<div class="opt' + (app ? ' chosen' : '') + '">' +
+      (o.photo_url ? imgTag(o.photo_url, 'thumb', bm(o)) : '') +
+      '<div><b>' + esc(o.supplier) + '</b> — ' + esc(bm(o)) +
+      (o.source === 'TECH' ? ' <span class="chip y">ราคาช่าง</span>' : '') +
+      (rec ? ' <span class="chip b">★ แนะนำ</span>' : '') +
+      (app ? ' <span class="chip g">✔ อนุมัติแล้ว</span>' : '') + '</div>' +
+      '<div class="small">รวม <b>' + baht(o.total_cost) + '</b> • ' + baht(o.unit_price) + '/หน่วย + ส่ง ' + baht(o.shipping) +
+      ' + VAT ' + esc(o.vat_rate) + '% • ได้ของ ' + esc(o.delivery_date || o.availability || '-') +
+      ' • ' + esc(o.payment_terms || '-') + '</div>' +
+      (o.spec ? '<div class="small muted">' + esc(o.spec) + '</div>' : '') +
+      (o.product_link ? '<div class="small"><a href="' + esc(o.product_link) + '" target="_blank" rel="noopener">ดูสินค้า</a></div>' : '') +
+      (['QUOTING', 'TECH_SPEC'].indexOf(it.stage) >= 0 ?
+        ('<div class="btn-row">' +
+          (rec ? '' : '<button class="btn btn-sm" onclick="recommend(\'' + it.item_id + '\',\'' + o.option_id + '\')">★ แนะนำเจ้านี้</button>') +
+          '<button class="btn btn-sm btn-danger" onclick="withdraw(\'' + o.option_id + '\',this)">ถอน</button></div>') : '') +
+      '</div>');
+  });
+
+  if (it.recommend_reason) {
+    h.push('<div class="banner info small"><b>เหตุผลที่แนะนำ:</b> ' + esc(it.recommend_reason) + '</div>');
+  }
+  if (['QUOTING', 'TECH_SPEC'].indexOf(it.stage) >= 0 && it.tech_status === 'CONFIRMED') {
+    h.push('<div class="btn-row"><button class="btn" onclick="toggleBox(\'opt_' + it.item_id + '\',optionForm,\'' + it.item_id + '\')">➕ เพิ่มราคาอีกเจ้า</button></div>');
+  }
+  return h.join('');
+}
+
+/* ---------- ปุ่มตามขั้นตอน ---------- */
 function actions(it) {
   var h = [];
-  if (['NEED_OPTION', 'CHANGE_REQ', 'TECH_SPEC', 'TECH_MODE'].indexOf(it.stage) >= 0) {
-    h.push('<div class="btn-row"><button class="btn btn-primary" onclick="toggleBox(\'opt_' + it.item_id + '\',optionForm,\'' + it.item_id + '\')">➕ เพิ่มตัวเลือก/เสนอราคา</button></div>');
+  if (it.stage === 'QUOTING') {
+    h.push('<div class="sec-title">3. ส่งผู้บริหารอนุมัติ</div>');
+    if (it.ready.ok) {
+      h.push('<div class="banner okb small">พร้อมส่งอนุมัติแล้ว — เทียบ ' + it.quote.count + ' เจ้า และเลือกตัวที่แนะนำแล้ว</div>');
+      h.push('<div class="btn-row"><button class="btn btn-primary" onclick="submitApproval(\'' + it.item_id + '\',this)">📨 ส่งให้ผู้บริหารอนุมัติ</button></div>');
+    } else {
+      h.push('<div class="banner warnb small">ยังส่งไม่ได้: ' + esc(it.ready.why) + '</div>');
+    }
   }
   if (it.stage === 'APPROVAL') {
-    var total = 0, detail = '';
-    if (it.fulfil_mode === 'LOCAL') {
-      total = numOf(it.local_est_price) * numOf(it.qty);
-      detail = 'ช่างซื้อเองที่ ' + esc(it.local_store || '-') + ' • ประเมิน ' + baht(it.local_est_price) + '/หน่วย → รวม ' + baht(total) +
-        '<br>ยืนยันขอใบกำกับภาษีในนามบริษัทได้: ' + (it.tax_invoice_ok === 'Y' ? '✔ ใช่' : '✖ ไม่');
-    } else {
-      var o = it.options.filter(function (x) { return String(x.option_id) === String(it.chosen_option_id); })[0];
-      total = numOf(o ? o.total_cost : 0);
-      detail = 'จัดซื้อสั่งซื้อ • ' + esc(bm(o)) + ' จาก ' + esc(o ? o.supplier : '-') + ' รวม ' + baht(total);
-    }
-    var limit = numOf(ST.config.approvalLimit);
-    h.push('<div class="banner ' + (limit && total > limit ? 'warnb' : 'info') + '">' +
-      '<b>รออนุมัติสั่งซื้อ</b><br><span class="small">' + detail +
-      '<br>ช่างตัดสินใจโดย ' + esc(it.decided_by) + ' เมื่อ ' + fmtDT(it.decided_at) + '</span>' +
-      (limit && total > limit ? ('<br><b class="small">ยอดเกิน ' + baht(limit) + ' — ให้ผู้จัดการเป็นผู้อนุมัติ</b>') : '') + '</div>');
-    h.push('<label>เลขที่ PO / เอกสารอ้างอิง <span class="en">/ PO ref</span></label>' +
-      '<input id="po_' + it.item_id + '" placeholder="เช่น PO-2026-0142">' +
-      '<label>หมายเหตุการอนุมัติ</label><input id="an_' + it.item_id + '" placeholder="ไม่บังคับ">' +
-      '<div class="btn-row">' +
-      '<button class="btn btn-ok" onclick="approve(\'' + it.item_id + '\',true,this)">✅ อนุมัติสั่งซื้อ</button>' +
-      '<button class="btn btn-danger" onclick="approve(\'' + it.item_id + '\',false,this)">❌ ไม่อนุมัติ</button>' +
-      '</div>');
+    h.push('<div class="banner info small">⏳ ส่งให้ผู้บริหารแล้ว รออนุมัติ — <b>จัดซื้อยังเปิด PO ไม่ได้จนกว่าจะอนุมัติ</b></div>');
+    h.push('<div class="btn-row"><button class="btn btn-sm btn-warn" onclick="withdrawApproval(\'' + it.item_id + '\',this)">↩️ ดึงกลับมาแก้</button></div>');
   }
-  if (it.stage === 'TO_ORDER') {
-    h.push('<div class="btn-row"><button class="btn btn-primary" onclick="setStatus(\'' + it.item_id + '\',\'ORDERED\',this)">📦 บันทึกว่าสั่งซื้อแล้ว</button></div>');
+  if (it.stage === 'TO_PO') {
+    var ao = it.options.filter(function (o) { return String(o.option_id) === String(it.approved_option_id); })[0];
+    h.push('<div class="banner okb small"><b>✅ ผู้บริหารอนุมัติแล้ว</b> โดย ' + esc(it.mgr_by || '-') + ' ' + fmtDT(it.mgr_at) +
+      '<br>สั่งกับ ' + esc(ao ? ao.supplier : '-') + ' — ' + esc(bm(ao)) + ' รวม ' + baht(ao ? ao.total_cost : 0) +
+      (it.mgr_note ? ('<br>หมายเหตุ: ' + esc(it.mgr_note)) : '') + '</div>');
+    h.push('<label class="req">เลขที่ PO</label><input id="po_' + it.item_id + '" placeholder="เช่น PO-2026-0148">');
+    h.push('<div class="btn-row"><button class="btn btn-primary" onclick="issuePO(\'' + it.item_id + '\',this)">📄 บันทึกว่าเปิด PO แล้ว</button></div>');
   }
   if (it.stage === 'ORDERED') {
-    h.push('<div class="btn-row"><button class="btn btn-ok" onclick="setStatus(\'' + it.item_id + '\',\'RECEIVED\',this)">✅ รับของแล้ว</button></div>');
+    h.push('<div class="banner okb small">เปิด PO แล้ว: <b>' + esc(it.po_ref) + '</b> โดย ' + esc(it.po_by || '-') + ' ' + fmtDT(it.po_at) + '</div>');
+    h.push('<div class="btn-row"><button class="btn btn-ok" onclick="setStatus(\'' + it.item_id + '\',\'RECEIVED\',this)">📦 รับของแล้ว</button></div>');
   }
   if (it.stage === 'LOCAL_BUY') {
-    h.push('<div class="banner warnb small">อนุมัติแล้ว รอช่างไปซื้อและอัปโหลดใบเสร็จ • ร้าน ' + esc(it.local_store || '-') +
-      ' • ประเมิน ' + baht(it.local_est_price) + (it.po_ref ? (' • ' + esc(it.po_ref)) : '') + '</div>');
+    h.push('<div class="banner warnb small">ผู้บริหารให้ช่างซื้อเอง — กด 📱 ข้อความ LINE เพื่อส่งข้อมูลใบกำกับภาษีให้ช่าง แล้วรอใบเสร็จ</div>');
   }
   if (it.stage === 'DONE') {
     h.push('<div class="banner okb small">เสร็จสิ้น' +
       (it.receipt_url ? (' • <a href="' + esc(it.receipt_url) + '" target="_blank" rel="noopener">ดูใบเสร็จ</a>') : '') +
-      (it.approved_by ? (' • อนุมัติโดย ' + esc(it.approved_by) + ' ' + fmtDT(it.approved_at)) : '') + '</div>');
-    if (it.purchase_status !== 'CLOSED') {
-      h.push('<div class="btn-row"><button class="btn btn-sm" onclick="setStatus(\'' + it.item_id + '\',\'CLOSED\',this)">ปิดงาน</button></div>');
-    }
+      (numOf(it.actual_price) ? (' • ราคาจริง ' + baht(it.actual_price)) : '') + '</div>');
+    h.push('<div class="btn-row"><button class="btn btn-sm" onclick="setStatus(\'' + it.item_id + '\',\'CLOSED\',this)">ปิดงาน</button></div>');
   }
-  if (['DONE', 'CANCELLED', 'PUR_REJECTED'].indexOf(it.stage) < 0) {
+  if (it.stage === 'MGR_REJECTED') {
+    h.push('<div class="banner err small"><b>ผู้บริหารไม่อนุมัติ</b> — ' + esc(it.mgr_by || '-') + '<br>' + esc(it.mgr_note || '-') + '</div>');
+  }
+  if (['DONE', 'CANCELLED', 'MGR_REJECTED', 'ORDERED'].indexOf(it.stage) < 0) {
     h.push('<div class="btn-row"><button class="btn btn-sm btn-danger" onclick="setStatus(\'' + it.item_id + '\',\'CANCELLED\',this)">ยกเลิกรายการ</button></div>');
   }
   return h.join('');
 }
 
 /* ---------- กล่องฟอร์ม ---------- */
-var openBox = {};
-function toggleBox(key, builder, itemId) {
+function toggleBox(key, fn, itemId, keep) {
   var box = $('#box_' + itemId);
-  if (openBox[itemId] === key) { box.innerHTML = ''; openBox[itemId] = null; return; }
-  openBox[itemId] = key;
-  box.innerHTML = builder(itemId);
+  if (!box) return;
+  if (!keep && openBox[itemId] && openBox[itemId].key === key) { openBox[itemId] = null; box.innerHTML = ''; return; }
+  openBox[itemId] = { key: key, fn: fn };
+  box.innerHTML = fn(itemId);
+}
+
+function specForm(itemId) {
+  var it = ST.items.filter(function (x) { return x.item_id === itemId; })[0];
+  return '<div class="card" style="background:#f8fbff">' +
+    '<h3>ส่งสเปคให้ช่างตรวจ — ' + esc(it.tool_name) + '</h3>' +
+    '<div class="banner info small">ช่างจะเห็นเฉพาะสเปคนี้ ไม่เห็นราคาและไม่เห็นว่าเจ้าไหน</div>' +
+    (it.brand_pref ? '<div class="muted small">ช่างอยากได้: <b>' + esc(it.brand_pref) + '</b></div>' : '') +
+    '<div class="grid2">' +
+    '<div><label>ยี่ห้อ <span class="en">/ Brand</span></label><input id="s_brand_' + itemId + '" value="' + esc(it.spec_brand || '') + '" placeholder="เช่น Mitutoyo"></div>' +
+    '<div><label>รุ่น <span class="en">/ Model</span></label><input id="s_model_' + itemId + '" value="' + esc(it.spec_model || '') + '" placeholder="เช่น 2046A"></div>' +
+    '</div>' +
+    '<label>รายละเอียดสเปค <span class="en">/ Spec detail</span></label>' +
+    '<textarea id="s_detail_' + itemId + '" placeholder="ช่วงวัด ความละเอียด กำลังไฟ อุปกรณ์ที่ให้มา ฯลฯ">' + esc(it.spec_detail || '') + '</textarea>' +
+    '<label>ลิงก์หน้าสินค้า</label><input id="s_link_' + itemId + '" value="' + esc(it.spec_link || '') + '">' +
+    '<label>รูปสินค้า (ช่างดูรูปเป็นหลัก)</label><input id="s_photo_' + itemId + '" type="file" accept="image/*">' +
+    '<div class="btn-row"><button class="btn btn-primary" onclick="sendSpec(\'' + itemId + '\',this)">ส่งให้ช่างตรวจ</button></div></div>';
+}
+
+function sendSpec(itemId, btn) {
+  var payload = {
+    brand: $('#s_brand_' + itemId).value.trim(),
+    model: $('#s_model_' + itemId).value.trim(),
+    detail: $('#s_detail_' + itemId).value.trim(),
+    link: $('#s_link_' + itemId).value.trim()
+  };
+  if (!payload.brand && !payload.model && !payload.detail) { toast('กรอกยี่ห้อ/รุ่น หรือรายละเอียดสเปคอย่างน้อยหนึ่งอย่าง', 'err'); return; }
+  var f = $('#s_photo_' + itemId).files[0];
+  busy(btn, true, 'กำลังส่ง...');
+  (f ? readFileForUpload(f, 1400, 0.82) : Promise.resolve(null))
+    .then(function (file) { if (file) payload.photo = file; return api('apiSetSpec', STAFF.token, itemId, payload); })
+    .then(function () { busy(btn, false); toast('ส่งสเปคให้ช่างแล้ว', 'ok'); openBox[itemId] = null; refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
 }
 
 function optionForm(itemId) {
   var it = ST.items.filter(function (x) { return x.item_id === itemId; })[0];
   return '<div class="card" style="background:#f8fbff">' +
-    '<h3>เสนอตัวเลือกสำหรับ ' + esc(it.tool_name) + ' (x' + esc(it.qty) + ')</h3>' +
-    (it.brand_pref ? '<div class="banner info small">ช่างอยากได้: <b>' + esc(it.brand_pref) + '</b></div>' : '') +
-    '<div class="grid2">' +
-    '<div><label class="req">ยี่ห้อ <span class="en">/ Brand</span></label><input id="o_brand_' + itemId + '" placeholder="เช่น Mitutoyo"></div>' +
-    '<div><label>รุ่น <span class="en">/ Model</span></label><input id="o_model_' + itemId + '" placeholder="เช่น 2046A"></div>' +
-    '</div>' +
-    '<label>สเปคสำคัญ <span class="en">/ Key specs</span></label><textarea id="o_spec_' + itemId + '" placeholder="กำลังไฟ ขนาด อุปกรณ์ที่ให้มา ระยะประกัน"></textarea>' +
+    '<h3>เพิ่มราคา 1 เจ้า — ' + esc(it.tool_name) + ' (x' + esc(it.qty) + ')</h3>' +
+    '<div class="muted small">สเปคที่ช่างยืนยันแล้ว: <b>' + esc([it.spec_brand, it.spec_model].filter(Boolean).join(' ') || '-') + '</b></div>' +
     '<label class="req">ผู้ขาย/ร้าน <span class="en">/ Supplier</span></label><input id="o_sup_' + itemId + '">' +
-    '<label>ลิงก์สินค้า <span class="en">/ Product link</span></label><input id="o_link_' + itemId + '">' +
-    '<label>รูปสินค้า (อัปโหลด) <span class="en">/ Photo</span></label><input id="o_photo_' + itemId + '" type="file" accept="image/*">' +
-    '<label>หรือวางลิงก์รูปภาพ <span class="en">/ Image URL</span></label><input id="o_photourl_' + itemId + '" placeholder="https://...">' +
+    '<div class="grid2">' +
+    '<div><label>ยี่ห้อ</label><input id="o_brand_' + itemId + '" value="' + esc(it.spec_brand || '') + '"></div>' +
+    '<div><label>รุ่น</label><input id="o_model_' + itemId + '" value="' + esc(it.spec_model || '') + '"></div>' +
+    '</div>' +
+    '<label>สเปค/หมายเหตุสินค้า</label><textarea id="o_spec_' + itemId + '" placeholder="ต่างจากสเปคหลักตรงไหน เช่น ไม่มีขาแม่เหล็ก"></textarea>' +
+    '<label>ลิงก์สินค้า</label><input id="o_link_' + itemId + '">' +
+    '<label>รูปสินค้า</label><input id="o_photo_' + itemId + '" type="file" accept="image/*">' +
     '<div class="grid3">' +
-    '<div><label class="req">ราคา/หน่วย (ไม่รวม VAT)</label><input id="o_price_' + itemId + '" type="number" inputmode="decimal" step="0.01"></div>' +
+    '<div><label class="req">ราคา/หน่วย</label><input id="o_price_' + itemId + '" type="number" inputmode="decimal" step="0.01"></div>' +
     '<div><label>VAT %</label><input id="o_vat_' + itemId + '" type="number" step="0.01" value="' + esc(ST.config.vatRate) + '"></div>' +
     '<div><label>ค่าส่ง</label><input id="o_ship_' + itemId + '" type="number" step="0.01" value="0"></div>' +
     '</div>' +
     '<div class="grid2">' +
-    '<div><label>สถานะสินค้า <span class="en">/ Availability</span></label><input id="o_avail_' + itemId + '" placeholder="มีของ / สั่งผลิต 7 วัน"></div>' +
-    '<div><label>วันที่ได้ของ <span class="en">/ Delivery</span></label><input id="o_deliv_' + itemId + '" type="date"></div>' +
+    '<div><label>สถานะสินค้า</label><input id="o_avail_' + itemId + '" placeholder="มีของ / สั่ง 7 วัน"></div>' +
+    '<div><label>วันที่ได้ของ</label><input id="o_deliv_' + itemId + '" type="date"></div>' +
     '</div>' +
-    '<label>เงื่อนไขชำระเงิน <span class="en">/ Payment terms</span></label><input id="o_pay_' + itemId + '" placeholder="เครดิต 30 วัน / โอนก่อนส่ง">' +
-    '<label>หมายเหตุถึงช่าง</label><input id="o_note_' + itemId + '">' +
-    '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="o_rec_' + itemId + '" style="width:20px;height:20px"> <span>จัดซื้อแนะนำตัวเลือกนี้</span></label>' +
-    '<div class="btn-row"><button class="btn btn-primary" onclick="addOption(\'' + itemId + '\',this)">บันทึกและแจ้งช่าง</button></div>' +
-    '</div>';
+    '<label>เงื่อนไขชำระเงิน</label><input id="o_pay_' + itemId + '" placeholder="เครดิต 30 วัน / โอนก่อนส่ง">' +
+    '<label>หมายเหตุถึงผู้บริหาร</label><input id="o_note_' + itemId + '">' +
+    '<div class="btn-row"><button class="btn btn-primary" onclick="addOption(\'' + itemId + '\',this)">บันทึกราคาเจ้านี้</button></div></div>';
 }
 
 function addOption(itemId, btn) {
   var g = function (p) { var el = $('#' + p + '_' + itemId); return el ? el.value.trim() : ''; };
   var payload = {
-    brand: g('o_brand'), model: g('o_model'), spec: g('o_spec'), supplier: g('o_sup'),
-    product_link: g('o_link'), photo_url: g('o_photourl'),
-    unit_price: numOf(g('o_price')), vat_rate: g('o_vat'), shipping: numOf(g('o_ship')),
-    availability: g('o_avail'), delivery_date: g('o_deliv'), payment_terms: g('o_pay'),
-    note: g('o_note'), is_recommended: $('#o_rec_' + itemId).checked
+    supplier: g('o_sup'), brand: g('o_brand'), model: g('o_model'), spec: g('o_spec'),
+    product_link: g('o_link'), unit_price: numOf(g('o_price')), vat_rate: g('o_vat'),
+    shipping: numOf(g('o_ship')), availability: g('o_avail'), delivery_date: g('o_deliv'),
+    payment_terms: g('o_pay'), note: g('o_note')
   };
-  if (!payload.brand || !payload.supplier || !payload.unit_price) {
-    toast('กรอก ยี่ห้อ, ผู้ขาย และราคาต่อหน่วย ให้ครบ', 'err'); return;
-  }
+  if (!payload.supplier || !payload.unit_price) { toast('กรอกผู้ขายและราคาต่อหน่วยให้ครบ', 'err'); return; }
   var f = $('#o_photo_' + itemId).files[0];
   busy(btn, true, 'กำลังบันทึก...');
   (f ? readFileForUpload(f, 1400, 0.82) : Promise.resolve(null))
-    .then(function (file) {
-      if (file) payload.photo = file;
-      return api('apiAddOption', STAFF.token, itemId, payload);
+    .then(function (file) { if (file) payload.photo = file; return api('apiAddOption', STAFF.token, itemId, payload); })
+    .then(function (r) {
+      busy(btn, false);
+      toast('บันทึกแล้ว — เทียบไป ' + r.quote.count + '/' + r.quote.min + ' เจ้า', 'ok');
+      openBox[itemId] = null; refresh(true);
     })
-    .then(function () { busy(btn, false); toast('บันทึกตัวเลือกแล้ว — แจ้งช่างให้ยืนยัน', 'ok'); openBox[itemId] = null; refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function useTechPrice(itemId, btn) {
+  busy(btn, true, 'กำลังเพิ่ม...');
+  api('apiAddTechPriceAsOption', STAFF.token, itemId)
+    .then(function (r) { busy(btn, false); toast('เพิ่มราคาของช่างเป็น 1 เจ้าแล้ว (' + r.quote.count + '/' + r.quote.min + ')', 'ok'); refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function recommend(itemId, optionId) {
+  var reason = prompt('เหตุผลที่แนะนำเจ้านี้ (ผู้บริหารจะเห็น)', '');
+  if (reason === null) return;
+  api('apiRecommend', STAFF.token, itemId, optionId, reason)
+    .then(function () { toast('บันทึกตัวที่แนะนำแล้ว', 'ok'); refresh(true); })
+    .catch(function (e) { toast(e.message, 'err'); });
+}
+
+function withdraw(optionId, btn) {
+  busy(btn, true, 'กำลังถอน...');
+  api('apiWithdrawOption', STAFF.token, optionId)
+    .then(function () { busy(btn, false); toast('ถอนตัวเลือกแล้ว', 'ok'); refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function submitApproval(itemId, btn) {
+  busy(btn, true, 'กำลังส่ง...');
+  api('apiSubmitForApproval', STAFF.token, itemId)
+    .then(function () { busy(btn, false); toast('ส่งให้ผู้บริหารอนุมัติแล้ว', 'ok'); refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function withdrawApproval(itemId, btn) {
+  var reason = prompt('เหตุผลที่ดึงกลับมาแก้', '');
+  if (reason === null) return;
+  busy(btn, true, 'กำลังดึงกลับ...');
+  api('apiWithdrawApproval', STAFF.token, itemId, reason)
+    .then(function () { busy(btn, false); toast('ดึงกลับมาแก้ได้แล้ว', 'ok'); refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function issuePO(itemId, btn) {
+  var po = ($('#po_' + itemId) || {}).value || '';
+  if (!po.trim()) { toast('กรุณาใส่เลขที่ PO', 'err'); return; }
+  busy(btn, true, 'กำลังบันทึก...');
+  api('apiIssuePO', STAFF.token, itemId, po, '')
+    .then(function () { busy(btn, false); toast('บันทึกเลข PO แล้ว', 'ok'); refresh(true); })
+    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
+}
+
+function setStatus(itemId, status, btn) {
+  if (status === 'CANCELLED' && !confirm('ยกเลิกรายการนี้?')) return;
+  busy(btn, true, 'กำลังบันทึก...');
+  api('apiSetPurchaseStatus', STAFF.token, itemId, status, '')
+    .then(function () { busy(btn, false); toast('บันทึกแล้ว', 'ok'); refresh(true); })
     .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
 }
 
 function noteForm(itemId) {
   var it = ST.items.filter(function (x) { return x.item_id === itemId; })[0];
   return '<div class="card" style="background:#f8fbff">' +
-    '<label>ข้อความถึงช่าง (แสดงบนหน้าช่าง)</label>' +
-    '<textarea id="n_' + itemId + '" placeholder="เช่น รุ่นนี้ที่ Global House ถูกกว่าและได้ของวันนี้ แนะนำให้ช่างซื้อเองแล้วเบิกคืน">' + esc(it.pur_note || '') + '</textarea>' +
+    '<label>ข้อความถึงช่าง (ช่างเห็นบนการ์ดของตัวเอง — ไม่ควรใส่ราคาผู้ขาย)</label>' +
+    '<textarea id="n_' + itemId + '" placeholder="เช่น รุ่นนี้ของหมด ขอเสนอรุ่นใกล้เคียงให้ดูนะครับ">' + esc(it.pur_note || '') + '</textarea>' +
     '<div class="btn-row"><button class="btn btn-primary" onclick="saveNote(\'' + itemId + '\',this)">ส่งข้อความ</button></div></div>';
 }
 
@@ -283,73 +431,31 @@ function saveNote(itemId, btn) {
     .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
 }
 
-function approve(itemId, ok, btn) {
-  var note = ($('#an_' + itemId) || {}).value || '';
-  var po = ($('#po_' + itemId) || {}).value || '';
-  if (!ok && !note.trim()) { toast('กรุณาระบุเหตุผลที่ไม่อนุมัติในช่องหมายเหตุ', 'err'); return; }
-  busy(btn, true, 'กำลังบันทึก...');
-  api('apiApprove', STAFF.token, itemId, ok, note, po)
-    .then(function () { busy(btn, false); toast(ok ? 'อนุมัติแล้ว' : 'บันทึกไม่อนุมัติแล้ว', 'ok'); refresh(true); })
-    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
-}
-
-function setStatus(itemId, status, btn) {
-  busy(btn, true, 'กำลังบันทึก...');
-  api('apiSetPurchaseStatus', STAFF.token, itemId, status, '', '')
-    .then(function () { busy(btn, false); toast('อัปเดตสถานะแล้ว', 'ok'); refresh(true); })
-    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
-}
-
-function withdraw(optionId, btn) {
-  busy(btn, true, 'กำลังถอน...');
-  api('apiWithdrawOption', STAFF.token, optionId)
-    .then(function () { busy(btn, false); toast('ถอนตัวเลือกแล้ว', 'ok'); refresh(true); })
-    .catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
-}
-
-function hist(itemId) {
-  var box = $('#box_' + itemId);
-  openBox[itemId] = 'hist';
-  box.innerHTML = '<div class="card muted">กำลังโหลดประวัติ...</div>';
-  api('apiItemHistory', STAFF.token, itemId).then(function (rows) {
-    box.innerHTML = '<div class="card"><h3>ประวัติ ' + esc(itemId) + '</h3>' +
-      (rows.length ? rows.slice().reverse().map(function (x) {
-        return '<div class="hist"><b>' + fmtDT(x.ts) + '</b> — ' + esc(x.actor) + ' (' + esc(x.role) + ')<br>' +
-          esc(x.action) + (x.detail ? (': ' + esc(x.detail)) : '') + '</div>';
-      }).join('') : '<div class="muted">ยังไม่มีประวัติ</div>') + '</div>';
-  }).catch(function (e) { box.innerHTML = '<div class="banner err">' + esc(e.message) + '</div>'; });
-}
-
 function lineMsg(reqId) {
-  api('apiLineText', STAFF.token, reqId).then(function (r) {
-    var texts = (r.pending || []).map(function (p) { return p.message; });
-    texts.push(r.summary);
-    var all = texts.join('\n\n──────────\n\n');
-    var box = document.createElement('div');
-    box.className = 'card';
-    box.innerHTML = '<h3>ข้อความสำหรับส่ง LINE — ' + esc(reqId) + '</h3>' +
-      '<textarea id="linetext" style="min-height:200px">' + esc(all) + '</textarea>' +
-      '<div class="btn-row">' +
-      '<button class="btn btn-primary" onclick="copyLine(\'' + reqId + '\')">📋 คัดลอก + ทำเครื่องหมายว่าส่งแล้ว</button>' +
-      '<button class="btn btn-sm" onclick="this.closest(\'.card\').remove()">ปิด</button></div>';
-    $('#list').insertBefore(box, $('#list').firstChild);
-    window.scrollTo(0, 0);
+  api('apiLineText', STAFF.token, reqId).then(function (d) {
+    var texts = [d.summary].concat(d.pending.map(function (p) { return p.message; }));
+    var body = texts.join('\n\n— — —\n\n');
+    copyText(body).then(function (ok) {
+      toast(ok ? 'คัดลอกข้อความแล้ว วางในแชท LINE ของช่างได้เลย' : 'คัดลอกไม่สำเร็จ', ok ? 'ok' : 'err');
+      if (ok && d.pending.length) api('apiMarkLineSent', STAFF.token, reqId).then(function () { refresh(true); });
+    });
   }).catch(function (e) { toast(e.message, 'err'); });
 }
 
-function copyLine(reqId) {
-  copyText($('#linetext').value).then(function (ok) {
-    toast(ok ? 'คัดลอกแล้ว — วางในแชท LINE ของช่าง' : 'คัดลอกไม่สำเร็จ กรุณาเลือกข้อความแล้วคัดลอกเอง', ok ? 'ok' : 'err');
-    if (ok) api('apiMarkLineSent', STAFF.token, reqId).then(function () { refresh(true); });
-  });
+function hist(itemId) {
+  api('apiItemHistory', STAFF.token, itemId).then(function (rows) {
+    var box = $('#box_' + itemId);
+    openBox[itemId] = null;
+    box.innerHTML = '<div class="card" style="background:#fafbfc"><h3>ประวัติ ' + esc(itemId) + '</h3>' +
+      rows.map(function (h) {
+        return '<div class="hist"><b>' + fmtDT(h.ts) + '</b> • ' + esc(h.actor) + ' (' + esc(h.role) + ')<br>' +
+          esc(h.action) + (h.detail ? (' — ' + esc(h.detail)) : '') + '</div>';
+      }).join('') + '</div>';
+  }).catch(function (e) { toast(e.message, 'err'); });
 }
 
 $('#l_btn').addEventListener('click', login);
 $('#l_pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') login(); });
+$('#q').addEventListener('change', function () { refresh(true); });
 $('#l_name').value = lsGet('staff_name', '');
-var qTimer = null;
-$('#q').addEventListener('input', function () {
-  clearTimeout(qTimer);
-  qTimer = setTimeout(function () { refresh(true); }, 400);
-});
 </script>

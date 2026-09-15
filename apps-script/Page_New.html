@@ -13,9 +13,18 @@
 
   <div class="card">
     <h3>1. ข้อมูลผู้ขอ <span class="muted small">/ Requester</span></h3>
-    <label class="req">ชื่อช่างผู้ขอ <span class="en">/ Name</span></label>
-    <input id="f_name" list="techlist" placeholder="เลือกหรือพิมพ์ชื่อ" autocomplete="off">
-    <datalist id="techlist"></datalist>
+    <div class="grid2">
+      <div>
+        <label class="req">ชื่อช่างผู้ขอ <span class="en">/ Name</span></label>
+        <input id="f_name" list="techlist" placeholder="เลือกชื่อของคุณ" autocomplete="off">
+        <datalist id="techlist"></datalist>
+      </div>
+      <div>
+        <label class="req">รหัสพนักงาน <span class="en">/ Employee code</span></label>
+        <input id="f_emp" inputmode="numeric" placeholder="เลือกชื่อแล้วระบบเติมให้" autocomplete="off">
+      </div>
+    </div>
+    <div class="muted small" id="emp_hint">เลือกชื่อจากรายการ ระบบจะเติมรหัสพนักงานให้อัตโนมัติ</div>
 
     <div class="grid2">
       <div>
@@ -89,6 +98,7 @@ function itemTemplate(k) {
     '</div>' +
     '<label>ร้านที่ไปดูราคามา <span class="en">/ Store</span></label>' +
     '<input class="f_bstore" value="' + esc(CFG.benchmarkStore || '') + '" placeholder="เช่น Global House">' +
+    '<div class="muted small">ยังไม่ได้ไปดูราคาก็เว้นว่างได้ — ส่งคำขอไปก่อน แล้วค่อยเพิ่มราคาทีหลังในลิงก์ติดตาม</div>' +
     '<label>ใช้ทำอะไร <span class="en">/ Intended use</span></label>' +
     '<textarea class="f_use" placeholder="เช่น เจาะปูนยึดแป้นมอเตอร์ ไลน์ 3"></textarea>' +
     '<label>สเปคที่ต้องการ <span class="en">/ Required specification</span></label>' +
@@ -160,6 +170,8 @@ function dropPhoto(k, i) { photoStore[k].splice(i, 1); drawPreview(k); }
 function collect() {
   var name = $('#f_name').value.trim();
   if (!name) throw new Error('กรุณาระบุชื่อผู้ขอ');
+  var emp = $('#f_emp').value.trim();
+  if (!emp) throw new Error('กรุณาระบุรหัสพนักงาน');
   var date = $('#f_date').value;
   if (!date) throw new Error('กรุณาระบุวันที่ต้องการใช้');
 
@@ -177,8 +189,8 @@ function collect() {
       spec_pref: $('.f_spec', el).value.trim(),
       brand_pref: $('.f_brand', el).value.trim(),
       item_note: $('.f_inote', el).value.trim(),
-      benchmark_price: numOf($('.f_bprice', el).value),
-      benchmark_store: $('.f_bstore', el).value.trim(),
+      bench_price: numOf($('.f_bprice', el).value),
+      bench_store: $('.f_bstore', el).value.trim(),
       ref_links: $('.f_link', el).value.trim(),
       photos: photoStore[k] || []
     });
@@ -186,6 +198,7 @@ function collect() {
   if (!items.length) throw new Error('กรุณากรอกชื่อเครื่องมืออย่างน้อย 1 รายการ');
 
   return {
+    emp_code: emp,
     requester_name: name,
     site: $('#f_site').value.trim(),
     contact: $('#f_contact').value.trim(),
@@ -236,18 +249,42 @@ function copyLink() {
   });
 }
 
+function techByName(n) {
+  return TECHS.filter(function (x) { return x.name === String(n).trim(); })[0] || null;
+}
+function techByCode(c) {
+  return TECHS.filter(function (x) { return String(x.emp_code) === String(c).trim(); })[0] || null;
+}
+
+/* เลือกชื่อ -> เติมรหัส / พิมพ์รหัส -> เติมชื่อ ให้พิมพ์น้อยที่สุด */
+function syncFromName() {
+  var t = techByName($('#f_name').value);
+  if (!t) { $('#emp_hint').textContent = 'ไม่พบชื่อนี้ในรายชื่อ — กรุณากรอกรหัสพนักงานเอง'; return; }
+  $('#f_emp').value = t.emp_code || '';
+  if (t.site && !$('#f_site').value) $('#f_site').value = t.site;
+  lsSet('tech_name', t.name); lsSet('tech_emp', t.emp_code || '');
+  $('#emp_hint').textContent = 'รหัส ' + (t.emp_code || '-') + ' • ' + (t.site || '-');
+}
+function syncFromCode() {
+  var t = techByCode($('#f_emp').value);
+  if (!t) { $('#emp_hint').textContent = 'ไม่พบรหัสนี้ในรายชื่อ — ตรวจสอบอีกครั้ง หรือเลือกชื่อจากรายการ'; return; }
+  $('#f_name').value = t.name;
+  if (t.site && !$('#f_site').value) $('#f_site').value = t.site;
+  lsSet('tech_name', t.name); lsSet('tech_emp', t.emp_code || '');
+  $('#emp_hint').textContent = t.name + ' • ' + (t.site || '-');
+}
+
 (function init() {
   $('#techlist').innerHTML = TECHS.map(function (t) {
-    return '<option value="' + esc(t.name) + '">' + esc(t.site || '') + '</option>';
+    return '<option value="' + esc(t.name) + '">' + esc(t.emp_code || '') + ' • ' + esc(t.site || '') + '</option>';
   }).join('');
   $('#f_name').value = lsGet('tech_name', '');
+  $('#f_emp').value = lsGet('tech_emp', '');
   $('#f_site').value = lsGet('tech_site', '');
   $('#f_contact').value = lsGet('tech_contact', '');
-  $('#f_name').addEventListener('change', function () {
-    lsSet('tech_name', this.value);
-    var t = TECHS.filter(function (x) { return x.name === this.value; }.bind(this))[0];
-    if (t && t.site && !$('#f_site').value) $('#f_site').value = t.site;
-  });
+  if ($('#f_name').value) syncFromName();
+  $('#f_name').addEventListener('change', syncFromName);
+  $('#f_emp').addEventListener('change', syncFromCode);
   $('#f_site').addEventListener('change', function () { lsSet('tech_site', this.value); });
   $('#f_contact').addEventListener('change', function () { lsSet('tech_contact', this.value); });
   $('#btn_add').addEventListener('click', addItem);

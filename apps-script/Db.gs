@@ -110,6 +110,23 @@ function activeTechs_() {
   return readAll_(SHEET.TECHS)
     .filter(function (t) { return String(t.active).toUpperCase() !== 'N' && String(t.name).trim(); })
     .map(function (t) {
-      return { name: String(t.name).trim(), nickname: str_(t.nickname), site: str_(t.site), line_id: str_(t.line_id) };
+      return {
+        emp_code: str_(t.emp_code), name: String(t.name).trim(),
+        nickname: str_(t.nickname), site: str_(t.site), line_id: str_(t.line_id)
+      };
     });
+}
+
+/** หาช่างจากชื่อ หรือรหัสพนักงาน (ใช้เติมรหัสให้อัตโนมัติตอนส่งคำขอ) */
+function findTech_(nameOrCode) {
+  var q = str_(nameOrCode).toLowerCase();
+  if (!q) return null;
+  var list = activeTechs_();
+  for (var i = 0; i < list.length; i++) {
+    if (String(list[i].emp_code).toLowerCase() === q) return list[i];
+  }
+  for (var j = 0; j < list.length; j++) {
+    if (list[j].name.toLowerCase() === q) return list[j];
+  }
+  return null;
 }

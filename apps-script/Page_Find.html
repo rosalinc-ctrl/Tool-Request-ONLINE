@@ -2,12 +2,12 @@
 <?!= include('Style'); ?>
 <header class="top">
   <div class="t">🔎 ค้นหาคำขอของฉัน</div>
-  <div class="s">ใส่ชื่อของคุณเพื่อดูลิงก์คำขอล่าสุด</div>
+  <div class="s">ใส่รหัสพนักงานหรือชื่อ เพื่อดูลิงก์คำขอล่าสุด</div>
 </header>
 <div class="wrap">
   <div class="card">
-    <label class="req">ชื่อช่าง <span class="en">/ Your name</span></label>
-    <input id="q" placeholder="เช่น สมชาย">
+    <label class="req">รหัสพนักงาน หรือ ชื่อ <span class="en">/ Employee code or name</span></label>
+    <input id="q" placeholder="เช่น 1042 หรือ สมชาย">
     <div class="btn-row"><button class="btn btn-primary" id="btn">ค้นหา</button></div>
   </div>
   <div id="out"></div>
@@ -21,14 +21,14 @@ function go() {
   api('apiFindMyRequests', $('#q').value.trim()).then(function (rows) {
     busy(btn, false);
     $('#out').innerHTML = rows.length ? rows.map(function (r) {
-      return '<div class="card"><b>' + esc(r.req_id) + '</b> <span class="muted small">• ' + esc(r.requester_name) + '</span>' +
+      return '<div class="card"><b>' + esc(r.req_id) + '</b> <span class="muted small">• ' + esc(r.requester_name) + ' (' + esc(r.emp_code || '-') + ')</span>' +
         '<div class="muted small">ส่งเมื่อ ' + fmtDT(r.created_at) + ' • ต้องการใช้ ' + esc(r.required_date || '-') + ' • ' + r.count + ' รายการ</div>' +
         '<div class="small" style="margin:4px 0">' + esc(r.tools) + '</div>' +
         '<div class="btn-row"><a class="btn btn-ok" href="' + esc(r.url) + '">เปิดคำขอนี้</a></div></div>';
-    }).join('') : '<div class="card muted">ไม่พบคำขอของชื่อนี้</div>';
+    }).join('') : '<div class="card muted">ไม่พบคำขอของรหัส/ชื่อนี้</div>';
   }).catch(function (e) { busy(btn, false); toast(e.message, 'err'); });
 }
 $('#btn').addEventListener('click', go);
 $('#q').addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
-$('#q').value = lsGet('tech_name', '');
+$('#q').value = lsGet('tech_emp', '') || lsGet('tech_name', '');
 </script>

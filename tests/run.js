@@ -1,3 +1,4 @@
+/* ทดสอบ workflow ฝั่งเซิร์ฟเวอร์ทั้งหมด โดยไม่ต้อง deploy */
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const { g, SS, MAIL, FILES } = require('./mock.js');
 
@@ -14,244 +15,268 @@ function check(name, cond, extra) {
   else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? ('  → ' + JSON.stringify(extra)) : '')); }
 }
 function section(s) { console.log('\n=== ' + s + ' ==='); }
+function err(fn) { try { fn(); return null; } catch (e) { return e.message; } }
 
 const tinyJpgB64 = Buffer.from([0xff,0xd8,0xff,0xdb,0x00,0x43,0x00,0xff,0xd9]).toString('base64');
+const jpg = { name: 'p.jpg', mime: 'image/jpeg', dataB64: tinyJpgB64 };
 
 section('Setup');
 g.setupAll = ctx.setupAll;
 run('setupAll()');
 check('สร้างครบ 7 ชีต', SS.getSheets().length === 7, SS.getSheets().map(s => s.name));
-check('Config มีค่าเริ่มต้น', ctx.cfg_('STAFF_PIN') === '2468');
-check('มีรายชื่อช่างตัวอย่าง', ctx.activeTechs_().length === 3);
+check('มี PIN แยกของจัดซื้อและผู้บริหาร',
+  ctx.cfg_('STAFF_PIN') === '2468' && ctx.cfg_('MGR_PIN') === '9753');
+check('ค่าเริ่มต้นเทียบราคา 3 เจ้า', ctx.minQuotes_() === 3);
+check('รายชื่อช่างมีรหัสพนักงาน', ctx.activeTechs_()[0].emp_code === '1042', ctx.activeTechs_()[0]);
+check('ค้นหาช่างจากรหัสได้', (ctx.findTech_('1078') || {}).name === 'ช่างวิชัย แก้วมณี');
 ctx.setCfg_('PURCHASING_EMAILS', 'purchasing@meiwa.example');
-ctx.setCfg_('COMPANY_NAME', 'บริษัท เมวา (ประเทศไทย) จำกัด');
+ctx.setCfg_('MANAGEMENT_EMAILS', 'boss@meiwa.example');
+ctx.setCfg_('COMPANY_NAME', 'บริษัท เมวา เอ็นเตอร์ไพรส์ (ประเทศไทย) จำกัด');
 
-section('1) ช่างส่งคำขอ 2 รายการ + รูป');
+section('1) ช่างส่งคำขอ — ต้องมีรหัสพนักงาน');
+const noCode = err(() => ctx.apiSubmitRequest({ requester_name: 'คนนอก ไม่มีในระบบ', items: [{ tool_name: 'x' }] }));
+check('ไม่มีรหัสพนักงาน + ไม่อยู่ในรายชื่อ -> ส่งไม่ได้', /รหัสพนักงาน/.test(noCode || ''), noCode);
+const wrongCode = err(() => ctx.apiSubmitRequest({
+  emp_code: '9999', requester_name: 'ช่างสมชาย ใจดี', items: [{ tool_name: 'x' }] }));
+check('รหัสไม่ตรงกับชื่อ -> ส่งไม่ได้', /ไม่ตรง/.test(wrongCode || ''), wrongCode);
+
 const res = ctx.apiSubmitRequest({
-  requester_name: 'ช่างสมชาย ใจดี', site: 'โรงงาน 1', contact: 'LINE: somchai',
-  required_date: '2026-09-25', note: 'งานด่วน',
+  requester_name: 'ช่างสมชาย ใจดี',   // ไม่ใส่รหัส -> ระบบเติมให้จากรายชื่อ
+  contact: 'LINE: somchai', required_date: '2026-09-25', note: 'งานด่วน',
   items: [
-    { tool_name: 'สว่านโรตารี่ 26 มม.', qty: 1, unit: 'ตัว', intended_use: 'เจาะปูน',
-      spec_pref: 'Bosch/Makita SDS-Plus 800W+', benchmark_price: 4890, benchmark_store: 'Global House',
-      photos: [{ name: 'old.jpg', mime: 'image/jpeg', dataB64: tinyJpgB64 }] },
-    { tool_name: 'ประแจทอร์ค 1/2"', qty: 2, unit: 'ตัว', intended_use: 'ขันโบลต์',
-      spec_pref: '40-200 N·m', benchmark_price: 2150, benchmark_store: 'Global House' }
+    { tool_name: 'ไดอัลเกจ', qty: 1, unit: 'ตัว', intended_use: 'วัดความเยื้องศูนย์',
+      spec_pref: '0–10 มม. ละเอียด 0.01 มม.', brand_pref: 'Mitutoyo 2046A หรือเทียบเท่า',
+      item_note: 'ตัวเดิมเข็มค้าง', bench_price: 1650, bench_store: 'Global House',
+      photos: [jpg] },
+    { tool_name: 'ประแจทอร์ค 1/2"', qty: 2, unit: 'ตัว', spec_pref: '40–200 N·m มีใบสอบเทียบ' }
   ]
 });
 check('ได้เลขที่คำขอ', /^REQ-\d{4}-0001$/.test(res.req_id), res.req_id);
-check('ได้ลิงก์ token', /\?p=r&t=[0-9a-f]{16}$/.test(res.url), res.url);
-check('อัปโหลดรูปเข้า Drive 1 ไฟล์', Object.keys(FILES).length === 1);
-check('ส่งอีเมลแจ้งจัดซื้อ', MAIL.length === 1 && /ใบขอซื้อใหม่/.test(MAIL[0].subject));
-check('อีเมลมีราคาที่ช่างเห็นที่ร้าน', /4,890\.00 บาท/.test(MAIL[0].body));
+check('ระบบเติมรหัสพนักงานให้', res.emp_code === '1042', res.emp_code);
+check('อัปโหลดรูปเข้า Drive', Object.keys(FILES).length === 1);
+check('อีเมลแจ้งจัดซื้อ', MAIL.length === 1 && /ใบขอซื้อใหม่/.test(MAIL[0].subject));
+check('อีเมลมีรหัสพนักงาน', /1042/.test(MAIL[0].body));
+check('อีเมลมีราคาที่ช่างไปดูมา', /1,650\.00 บาท/.test(MAIL[0].body));
+check('อีเมลบอกขั้นตอนถัดไป (ร่างสเปคก่อนเทียบราคา)', /ร่างสเปคอ้างอิง 1 ชิ้น/.test(MAIL[0].body));
 
+const I1 = res.req_id + '-01', I2 = res.req_id + '-02';
 let dto = ctx.apiGetRequest(res.token);
-check('DTO มี 2 รายการ', dto.items.length === 2);
-check('สถานะเริ่มต้น = รอเสนอราคา', dto.items[0].stage === 'NEED_OPTION', dto.items[0].stage);
-check('item_id อ่านง่าย', dto.items[1].item_id === res.req_id + '-02', dto.items[1].item_id);
+check('เริ่มที่ขั้นรอจัดซื้อร่างสเปค', dto.items[0].stage === 'NEED_SPEC', dto.items[0].stage);
+check('ช่างเห็นราคาที่ตัวเองไปดูมา', ctx.num_(dto.items[0].bench_price) === 1650);
 
-section('2) จัดซื้อเข้าระบบและเสนอตัวเลือก');
-let bad = null; try { ctx.apiStaffData('ปลอม', {}); } catch (e) { bad = e.message; }
-check('token ปลอมเข้าไม่ได้', /เซสชันหมดอายุ/.test(bad || ''), bad);
-let badpin = null; try { ctx.apiStaffLogin('0000', 'x'); } catch (e) { badpin = e.message; }
-check('PIN ผิดเข้าไม่ได้', /รหัสไม่ถูกต้อง/.test(badpin || ''));
+section('2) หน้าช่างต้องไม่มีราคาผู้ขายหลุดออกไป');
 const staff = ctx.apiStaffLogin('2468', 'คุณแนน (จัดซื้อ)');
-check('เข้าสู่ระบบได้', !!staff.token);
+const mgr = ctx.apiMgrLogin('9753', 'คุณสมศักดิ์ (ผู้จัดการ)');
+check('จัดซื้อและผู้บริหารใช้ PIN คนละตัว', !!staff.token && !!mgr.token);
+check('PIN จัดซื้อเข้าหน้าผู้บริหารไม่ได้', /เซสชันผู้บริหารหมดอายุ/.test(err(() => ctx.apiMgrData(staff.token, {})) || ''));
+check('PIN ผู้บริหารเข้าหน้าจัดซื้อไม่ได้', /เซสชันจัดซื้อหมดอายุ/.test(err(() => ctx.apiStaffData(mgr.token, {})) || ''));
 
-const it1 = res.req_id + '-01', it2 = res.req_id + '-02';
-const o1 = ctx.apiAddOption(staff.token, it1, {
-  brand: 'Bosch', model: 'GBH 2-26 DRE', spec: 'SDS-Plus 800W 2.7J พร้อมกล่อง', supplier: 'ร้านเครื่องมือ ก.การช่าง',
-  unit_price: 5200, vat_rate: 7, shipping: 150, availability: 'มีของ', delivery_date: '2026-09-18',
-  payment_terms: 'เครดิต 30 วัน', is_recommended: true,
-  photo: { name: 'bosch.jpg', mime: 'image/jpeg', dataB64: tinyJpgB64 }
-});
-check('คำนวณราคารวมถูกต้อง (5200+150)*1.07', Math.abs(o1.total - 5724.5) < 0.001, o1.total);
-ctx.apiAddOption(staff.token, it2, {
-  brand: 'Tone', model: 'T4MN200', spec: '40-200 N·m มีใบสอบเทียบ', supplier: 'ไทยทูลส์',
-  unit_price: 2600, vat_rate: 7, shipping: 0, availability: 'สั่งผลิต 7 วัน',
-  delivery_date: '2026-09-24', payment_terms: 'โอนก่อนส่ง'
+section('3) จัดซื้อร่างสเปค 1 ชิ้นให้ช่างตรวจ');
+const tooEarly = err(() => ctx.apiAddOption(staff.token, I1, { supplier: 'x', unit_price: 100 }));
+check('ยังไม่ได้ให้ช่างยืนยันสเปค -> เทียบราคาไม่ได้', /ยืนยันสเปคก่อน/.test(tooEarly || ''), tooEarly);
+
+ctx.apiSetSpec(staff.token, I1, {
+  brand: 'Mitutoyo', model: '2046A',
+  detail: 'ช่วงวัด 0–10 มม. อ่านละเอียด 0.01 มม. พร้อมขาแม่เหล็ก', photo: jpg
 });
 dto = ctx.apiGetRequest(res.token);
-check('รายการที่ 1 -> รอช่างยืนยัน', dto.items[0].stage === 'TECH_SPEC', dto.items[0].stage);
-check('ตัวเลือกที่ 2 คิด VAT ตามจำนวน 2 ชิ้น', Math.abs(ctx.num_(dto.items[1].options[0].total_cost) - 5564) < 0.001, dto.items[1].options[0].total_cost);
-check('มีข้อความ LINE รอส่งให้ช่าง', ctx.readAll_('Notifications').filter(n => n.channel === 'LINE' && n.status === 'PENDING').length === 2);
+check('ส่งสเปคแล้ว -> รอช่างตรวจ', dto.items[0].stage === 'TECH_SPEC', dto.items[0].stage);
+check('ช่างเห็นยี่ห้อ/รุ่นที่เสนอ', dto.items[0].spec_brand === 'Mitutoyo' && dto.items[0].spec_model === '2046A');
+check('ช่างไม่ได้รับ field ราคาผู้ขายเลย',
+  !('options' in dto.items[0]) && !('recommend_option_id' in dto.items[0]),
+  Object.keys(dto.items[0]).filter(k => /option|recommend/.test(k)));
 
-section('3) ช่างตัดสินใจรายรายการ');
-let noName = null; try { ctx.apiTechDecision(res.token, it1, 'CONFIRM', { by: '', option_id: o1.option_id }); } catch (e) { noName = e.message; }
-check('ต้องระบุชื่อผู้ตัดสินใจ', /เลือกชื่อ/.test(noName || ''));
+section('4) ช่างยืนยันสเปค (ไม่เห็นราคา)');
+const noReason = err(() => ctx.apiTechSpecDecision(res.token, I1, 'CHANGE', { by: 'ช่างสมชาย ใจดี' }));
+check('ขอแก้สเปคต้องมีเหตุผล', /เหตุผล/.test(noReason || ''), noReason);
+ctx.apiTechSpecDecision(res.token, I1, 'CHANGE', { by: 'ช่างสมชาย ใจดี', note: 'ต้องมีขาแม่เหล็กแบบหมุนได้' });
+dto = ctx.apiGetRequest(res.token);
+check('ช่างขอแก้ -> เข้าหมวด SPEC_CHANGE', dto.items[0].stage === 'SPEC_CHANGE', dto.items[0].stage);
 
-dto = ctx.apiTechDecision(res.token, it1, 'CONFIRM', { by: 'ช่างสมชาย ใจดี', option_id: o1.option_id });
-check('ยืนยันแล้ว -> รอเลือกวิธีซื้อ', dto.items[0].stage === 'TECH_MODE', dto.items[0].stage);
-check('บันทึกชื่อ+เวลาที่ตัดสินใจ', dto.items[0].decided_by === 'ช่างสมชาย ใจดี' && /\d{4}-\d\d-\d\d \d\d:\d\d:\d\d/.test(dto.items[0].decided_at));
-check('ยืนยันสเปคยังไม่ใช่การอนุมัติ', dto.items[0].purchase_status === 'WAITING_TECH', dto.items[0].purchase_status);
-check('แจ้งจัดซื้อว่าช่างยืนยัน', /ช่างยืนยันสเปคแล้ว/.test(MAIL[MAIL.length - 1].subject));
-
-let noReason = null;
-try { ctx.apiTechDecision(res.token, it2, 'REJECT', { by: 'ช่างสมชาย ใจดี', note: '' }); } catch (e) { noReason = e.message; }
-check('ปฏิเสธต้องมีเหตุผล', /เหตุผล/.test(noReason || ''));
-dto = ctx.apiTechDecision(res.token, it2, 'REJECT', { by: 'ช่างวิชัย แก้วมณี', option_id: dto.items[1].options[0].option_id, note: 'ช่วงทอร์คไม่พอ ต้องการถึง 300 N·m' });
-check('ปฏิเสธแล้วเข้าหมวดช่างขอแก้ไข', dto.items[1].stage === 'CHANGE_REQ', dto.items[1].stage);
-check('ตัวเลือกถูกตีกลับ', dto.items[1].options[0].status === 'REJECTED');
-
-section('4) เลือกวิธีซื้อ + ขั้นอนุมัติแยกต่างหาก');
-dto = ctx.apiChooseMode(res.token, it1, 'SUPPLIER', { by: 'ช่างสมชาย ใจดี' });
-check('เลือกให้จัดซื้อสั่ง -> รออนุมัติ', dto.items[0].stage === 'APPROVAL', dto.items[0].stage);
-
-let lockErr = null;
-try { ctx.apiTechDecision(res.token, it1, 'CONFIRM', { by: 'ช่างสมชาย ใจดี', option_id: o1.option_id }); } catch (e) { lockErr = e.message; }
-check('ส่งอนุมัติแล้วช่างแก้เองไม่ได้', /ส่งให้จัดซื้อดำเนินการแล้ว/.test(lockErr || ''), lockErr);
-
-const o2b = ctx.apiAddOption(staff.token, it2, {
-  brand: 'Tohnichi', model: 'QL280N', spec: '60-280 N·m', supplier: 'ไทยทูลส์',
-  unit_price: 3400, vat_rate: 7, shipping: 0, availability: 'มีของ', delivery_date: '2026-09-20', payment_terms: 'เครดิต 30 วัน'
+ctx.apiSetSpec(staff.token, I1, {
+  brand: 'Mitutoyo', model: '2046A',
+  detail: 'ช่วงวัด 0–10 มม. อ่านละเอียด 0.01 มม. + ขาแม่เหล็กแบบข้อต่อหมุนได้', photo: jpg
 });
-let needConfirm = null;
-try { ctx.apiChooseMode(res.token, it2, 'SUPPLIER', { by: 'ช่างวิชัย แก้วมณี' }); } catch (e) { needConfirm = e.message; }
-check('ยังไม่ยืนยันสเปค เลือก SUPPLIER ไม่ได้', /ยืนยันสเปค/.test(needConfirm || ''), needConfirm);
+ctx.apiTechSpecDecision(res.token, I1, 'CONFIRM', { by: 'ช่างสมชาย ใจดี', note: 'ตรงแล้วครับ' });
+dto = ctx.apiGetRequest(res.token);
+check('ช่างยืนยันสเปค -> เข้าขั้นเทียบราคา', dto.items[0].stage === 'QUOTING', dto.items[0].stage);
+check('บันทึกชื่อและเวลาที่ช่างกด', dto.items[0].tech_by === 'ช่างสมชาย ใจดี' && !!dto.items[0].tech_at);
 
-let noTax = null;
-try { ctx.apiChooseMode(res.token, it2, 'LOCAL', { by: 'ช่างวิชัย แก้วมณี', local_est_price: 2150, local_store: 'Global House', tax_invoice_ok: false }); } catch (e) { noTax = e.message; }
-check('ซื้อเองต้องยืนยันใบกำกับภาษี', /ใบกำกับภาษี/.test(noTax || ''), noTax);
-let noPrice = null;
-try { ctx.apiChooseMode(res.token, it2, 'LOCAL', { by: 'ช่างวิชัย แก้วมณี', local_store: 'Global House', tax_invoice_ok: true }); } catch (e) { noPrice = e.message; }
-check('ซื้อเองต้องมีราคาประเมิน', /ราคาประเมิน/.test(noPrice || ''), noPrice);
+section('5) จัดซื้อเทียบราคา 3 เจ้า');
+const o1 = ctx.apiAddOption(staff.token, I1, {
+  supplier: 'ไทยทูลส์ ซัพพลาย', brand: 'Mitutoyo', model: '2046A',
+  unit_price: 1850, vat_rate: 7, shipping: 0, delivery_date: '2026-09-16', payment_terms: 'เครดิต 30 วัน'
+});
+check('เทียบ 1 เจ้า ยังไม่ครบ', o1.quote.count === 1 && !o1.quote.ok, o1.quote);
+const notReady = err(() => ctx.apiSubmitForApproval(staff.token, I1));
+check('ยังไม่ครบ 3 เจ้า -> ส่งอนุมัติไม่ได้', /อย่างน้อย 3 เจ้า/.test(notReady || ''), notReady);
 
-dto = ctx.apiChooseMode(res.token, it2, 'LOCAL', { by: 'ช่างวิชัย แก้วมณี', local_est_price: 2150, local_store: 'Global House', tax_invoice_ok: true });
-check('ซื้อเองที่ร้าน -> รออนุมัติ (ไม่ใช่ซื้อได้เลย)', dto.items[1].stage === 'APPROVAL' && dto.items[1].purchase_status === 'PENDING_APPROVAL');
+const o2 = ctx.apiAddOption(staff.token, I1, {
+  supplier: 'ก.การช่าง', brand: 'Mitutoyo', model: '2046A',
+  unit_price: 1790, vat_rate: 7, shipping: 120, delivery_date: '2026-09-19', payment_terms: 'โอนก่อนส่ง'
+});
+const o3 = ctx.apiAddTechPriceAsOption(staff.token, I1);
+check('ดึงราคาที่ช่างไปดูมาเป็น 1 เจ้าได้', o3.quote.count === 3 && o3.quote.ok, o3.quote);
+check('ราคาของช่างถูกทำเครื่องหมายว่ามาจากช่าง',
+  ctx.findOne_('Options', 'option_id', o3.option_id).source === 'TECH');
+check('ดึงซ้ำไม่ได้', /ไปแล้ว/.test(err(() => ctx.apiAddTechPriceAsOption(staff.token, I1)) || ''));
+check('ราคาช่าง 1,650 ถูกที่สุดในสามเจ้า',
+  ctx.optionsOfItem_(I1)[0].option_id === o3.option_id, ctx.optionsOfItem_(I1).map(o => o.total_cost));
 
-section('5) จัดซื้ออนุมัติ / สั่งซื้อ / รับของ');
-let earlyReceipt = null;
-try { ctx.apiUploadReceipt(res.token, it2, { name: 'r.jpg', mime: 'image/jpeg', dataB64: tinyJpgB64 }, 'ช่างวิชัย แก้วมณี', 2100); } catch (e) { earlyReceipt = e.message; }
-check('ยังไม่อนุมัติ อัปโหลดใบเสร็จไม่ได้', /ยังไม่ได้รับอนุมัติ/.test(earlyReceipt || ''), earlyReceipt);
+const noRec = err(() => ctx.apiSubmitForApproval(staff.token, I1));
+check('ยังไม่ได้เลือกตัวที่แนะนำ -> ส่งอนุมัติไม่ได้', /แนะนำ/.test(noRec || ''), noRec);
+ctx.apiRecommend(staff.token, I1, o1.option_id, 'ของแท้ มีใบรับรอง ส่งเร็วสุด และให้เครดิต 30 วัน');
+ctx.apiSubmitForApproval(staff.token, I1);
+let board = ctx.apiStaffData(staff.token, {});
+let it1 = board.items.filter(i => i.item_id === I1)[0];
+check('ส่งอนุมัติแล้ว -> รอผู้บริหาร', it1.stage === 'APPROVAL', it1.stage);
+check('อีเมลถึงผู้บริหารมีตารางเทียบครบ 3 เจ้า',
+  /เทียบราคา 3 เจ้า/.test(MAIL[MAIL.length - 1].body) && /boss@meiwa.example/.test(MAIL[MAIL.length - 1].to));
+check('อีเมลผู้บริหารมีเหตุผลที่จัดซื้อแนะนำ', /ของแท้ มีใบรับรอง/.test(MAIL[MAIL.length - 1].body));
 
-ctx.apiApprove(staff.token, it1, true, 'ราคาเหมาะสม', 'PO-2026-0142');
-ctx.apiApprove(staff.token, it2, true, 'ให้ช่างซื้อเอง ได้ของวันนี้', 'PC-2026-0088');
-let st = ctx.apiStaffData(staff.token, {});
-const itemsById = {}; st.items.forEach(i => itemsById[i.item_id] = i);
-check('รายการ 1 -> รอสั่งซื้อ', itemsById[it1].stage === 'TO_ORDER', itemsById[it1].stage);
-check('รายการ 2 -> ช่างซื้อเอง รอใบเสร็จ', itemsById[it2].stage === 'LOCAL_BUY', itemsById[it2].stage);
-check('บันทึกผู้อนุมัติ', itemsById[it1].approved_by === 'คุณแนน (จัดซื้อ)' && !!itemsById[it1].approved_at);
-const lineLocal = ctx.readAll_('Notifications').filter(n => /อนุมัติให้ซื้อเอง/.test(n.subject))[0];
-check('ข้อความ LINE ซื้อเองแนบข้อมูลใบกำกับภาษี', !!lineLocal && /บริษัท เมวา/.test(lineLocal.message));
-check('ข้อความ LINE แนบเลขที่อ้างอิง', !!lineLocal && /PC-2026-0088/.test(lineLocal.message));
+section('6) เฉพาะผู้บริหารเท่านั้นที่อนุมัติได้');
+check('จัดซื้ออนุมัติเองไม่ได้ (ไม่มี API ให้จัดซื้อกด)', typeof ctx.apiApprove === 'undefined');
+const poEarly = err(() => ctx.apiIssuePO(staff.token, I1, 'PO-001'));
+check('ยังไม่อนุมัติ -> เปิด PO ไม่ได้', /อนุมัติแล้ว/.test(poEarly || ''), poEarly);
 
-ctx.apiSetPurchaseStatus(staff.token, it1, 'ORDERED', '', '');
-dto = ctx.apiUploadReceipt(res.token, it2, { name: 'receipt.jpg', mime: 'image/jpeg', dataB64: tinyJpgB64 }, 'ช่างวิชัย แก้วมณี', 2090);
+const mgrView = ctx.apiMgrData(mgr.token, {});
+check('หน้าผู้บริหารจัดกลุ่มเป็นใบ', mgrView.groups.length === 1 && mgrView.groups[0].req_id === res.req_id);
+check('ยอดรวมของใบใช้ตัวที่จัดซื้อแนะนำ',
+  Math.abs(mgrView.groups[0].total - 1979.5) < 0.01, mgrView.groups[0].total);
+
+ctx.apiMgrApprove(mgr.token, I1, o1.option_id, 'อนุมัติตามที่จัดซื้อเสนอ');
+board = ctx.apiStaffData(staff.token, {});
+it1 = board.items.filter(i => i.item_id === I1)[0];
+check('อนุมัติแล้ว -> รอเปิด PO', it1.stage === 'TO_PO', it1.stage);
+check('บันทึกชื่อผู้อนุมัติและเวลา', it1.mgr_by === 'คุณสมศักดิ์ (ผู้จัดการ)' && !!it1.mgr_at);
+check('ตัวเลือกที่ไม่ถูกเลือกถูกทำเครื่องหมายไว้',
+  ctx.findOne_('Options', 'option_id', o2.option_id).status === 'NOT_SELECTED');
+check('อนุมัติซ้ำไม่ได้', /รออนุมัติ/.test(err(() => ctx.apiMgrApprove(mgr.token, I1, o1.option_id)) || ''));
+
+ctx.apiIssuePO(staff.token, I1, 'PO-2026-0148');
+board = ctx.apiStaffData(staff.token, {});
+it1 = board.items.filter(i => i.item_id === I1)[0];
+check('เปิด PO แล้ว', it1.stage === 'ORDERED' && it1.po_ref === 'PO-2026-0148', it1.stage);
+ctx.apiSetPurchaseStatus(staff.token, I1, 'RECEIVED', 'ของถึงแล้ว');
+check('รับของแล้ว -> เสร็จสิ้น', ctx.apiStaffData(staff.token, {}).items.filter(i => i.item_id === I1)[0].stage === 'DONE');
+
+section('7) ผู้บริหารเลือกราคาของช่าง -> ช่างไปซื้อเอง');
+ctx.apiSetSpec(staff.token, I2, { brand: 'Tone', model: 'T4MN200', detail: '40–200 N·m พร้อมใบสอบเทียบ' });
+ctx.apiTechSpecDecision(res.token, I2, 'CONFIRM', { by: 'ช่างสมชาย ใจดี' });
+dto = ctx.apiGetRequest(res.token);
+check('ช่างเพิ่มราคาร้านทีหลังได้ (ตอนขอไม่ได้ใส่)', ctx.num_(dto.items[1].bench_price) === 0);
+ctx.apiAddBenchmark(res.token, I2, {
+  by: 'ช่างสมชาย ใจดี', bench_price: 2100, bench_store: 'Global House สาขาบางปะกง',
+  bench_note: 'มีของบนชั้น ซื้อได้เลย', photo: jpg
+});
+dto = ctx.apiGetRequest(res.token);
+check('บันทึกราคาที่ช่างส่งตามมาทีหลัง', ctx.num_(dto.items[1].bench_price) === 2100);
+check('จัดซื้อได้รับอีเมลแจ้งราคาที่ช่างส่งมา', /ช่างส่งราคาร้านข้างนอก/.test(MAIL[MAIL.length - 1].subject));
+
+ctx.apiAddOption(staff.token, I2, { supplier: 'ไทยทูลส์ ซัพพลาย', brand: 'Tone', model: 'T4MN200', unit_price: 2600, vat_rate: 7, shipping: 0 });
+ctx.apiAddOption(staff.token, I2, { supplier: 'ก.การช่าง', brand: 'Tone', model: 'T4MN200', unit_price: 2550, vat_rate: 7, shipping: 150 });
+const oTech2 = ctx.apiAddTechPriceAsOption(staff.token, I2);
+ctx.apiRecommend(staff.token, I2, oTech2.option_id, 'ร้านใกล้โรงงาน ถูกกว่าและได้ของวันนี้');
+ctx.apiSubmitForApproval(staff.token, I2);
+ctx.apiMgrApprove(mgr.token, I2, oTech2.option_id, 'ให้ช่างไปซื้อเองเลย');
+
+board = ctx.apiStaffData(staff.token, {});
+const it2 = board.items.filter(i => i.item_id === I2)[0];
+check('เลือกราคาของช่าง -> ตั้งเป็นช่างซื้อเองอัตโนมัติ', it2.buy_mode === 'LOCAL', it2.buy_mode);
+check('สถานะเป็นรอใบเสร็จ', it2.stage === 'LOCAL_BUY', it2.stage);
+check('รายการที่ให้ช่างซื้อเอง เปิด PO ไม่ได้',
+  /ไม่ต้องเปิด PO/.test(err(() => ctx.apiIssuePO(staff.token, I2, 'PO-x')) || ''));
+
+dto = ctx.apiGetRequest(res.token);
+check('ช่างเห็นวงเงินที่อนุมัติของรายการที่ต้องไปซื้อเอง',
+  ctx.num_(dto.items[1].approvedBudget) === 4200, dto.items[1].approvedBudget);
+const lineRows = ctx.readAll_('Notifications').filter(n => /อนุมัติให้ซื้อเอง/.test(n.subject));
+check('เตรียมข้อความ LINE พร้อมข้อมูลใบกำกับภาษี',
+  lineRows.length === 1 && /เมวา เอ็นเตอร์ไพรส์/.test(lineRows[0].message));
+
+const earlyReceipt = err(() => ctx.apiUploadReceipt(res.token, I1, jpg, 'ช่างสมชาย ใจดี', 100));
+check('อัปโหลดใบเสร็จได้เฉพาะรายการที่ช่างซื้อเอง', /ช่างซื้อเอง/.test(earlyReceipt || ''), earlyReceipt);
+ctx.apiUploadReceipt(res.token, I2, jpg, 'ช่างสมชาย ใจดี', 4180);
+dto = ctx.apiGetRequest(res.token);
 check('ส่งใบเสร็จแล้ว -> เสร็จสิ้น', dto.items[1].stage === 'DONE', dto.items[1].stage);
-check('เก็บลิงก์ใบเสร็จ', /drive\.google\.com\/file\/d\//.test(dto.items[1].receipt_url));
-check('บันทึกราคาจริงทับราคาประเมิน', ctx.num_(dto.items[1].local_est_price) === 2090);
-ctx.apiSetPurchaseStatus(staff.token, it1, 'RECEIVED', '', '');
-st = ctx.apiStaffData(staff.token, {});
-check('ทั้งสองรายการเสร็จสิ้น', st.counts.DONE === 2, st.counts);
+check('เก็บราคาจริงที่จ่าย', ctx.num_(dto.items[1].actual_price) === 4180);
 
-section('6) ประวัติ / แดชบอร์ด / แจ้งเตือน');
-const h1 = ctx.apiItemHistory(staff.token, it1);
-check('ประวัติรายการที่ 1 ครบทุกขั้น',
-  JSON.stringify(h1.map(x => x.action)) === JSON.stringify(
-    ['SUBMIT','ADD_OPTION','CONFIRM_SPEC','CHOOSE_SUPPLIER','APPROVE_PURCHASE','STATUS_ORDERED','STATUS_RECEIVED']),
-  h1.map(x => x.action));
-check('ประวัติเรียงตามเวลาและมีผู้ทำ', h1.every(x => x.ts && x.actor && x.role));
-check('มีทั้งบทบาทช่างและจัดซื้อ', h1.some(x => x.role === 'TECH') && h1.some(x => x.role === 'PURCHASING'));
-const filtered = ctx.apiStaffData(staff.token, { q: 'ทอร์ค' });
-check('ค้นหาด้วยคำภาษาไทยได้', filtered.items.length === 1 && filtered.items[0].item_id === it2);
-const found = ctx.apiFindMyRequests('สมชาย');
-check('ค้นหาคำขอจากชื่อช่างได้', found.length === 1 && found[0].req_id === res.req_id);
-ctx.apiMarkLineSent(staff.token, res.req_id);
-check('ทำเครื่องหมายส่ง LINE แล้ว', ctx.readAll_('Notifications').filter(n => n.channel === 'LINE' && n.status === 'PENDING').length === 0);
-const before = MAIL.length;
-ctx.dailyDigest();
-check('งานค้าง 0 รายการ -> ไม่ส่งสรุป', MAIL.length === before);
-
-section('7) ใบที่ 2 + สรุปงานค้าง');
-const r2 = ctx.apiSubmitRequest({ requester_name: 'ช่างนพดล ศรีสุข', required_date: '2026-10-01',
-  items: [{ tool_name: 'เครื่องเจียร 4 นิ้ว', qty: 3, unit: 'ตัว', benchmark_price: 1290, benchmark_store: 'Global House' }] });
-check('เลขที่ใบเรียงต่อเนื่อง', r2.req_id.endsWith('-0002'), r2.req_id);
-ctx.dailyDigest();
-check('มีงานค้าง -> ส่งสรุปรายวัน', MAIL.length === before + 2 && /สรุปงานค้าง/.test(MAIL[MAIL.length - 1].subject));
-check('สรุปมีชื่อขั้นตอนภาษาไทย', /รอจัดซื้อเสนอตัวเลือก/.test(MAIL[MAIL.length - 1].body));
-
-section('8) กรณีพิเศษ');
-const it3 = r2.req_id + '-01';
-const o3 = ctx.apiAddOption(staff.token, it3, { brand: 'Makita', model: 'GA4030', supplier: 'ไทยทูลส์', unit_price: 1450, vat_rate: 7, shipping: 200 });
-check('ค่าส่งถูกคิด VAT ด้วย ((1450*3)+200)*1.07', Math.abs(o3.total - 4868.5) < 0.001, o3.total);
-ctx.apiSetPurNote(staff.token, it3, 'ที่ Global House ถูกกว่า แนะนำให้ช่างซื้อเองแล้วเบิกคืน');
-let d2 = ctx.apiGetRequest(r2.token);
-check('ข้อความจากจัดซื้อแสดงบนหน้าช่าง', /Global House ถูกกว่า/.test(d2.items[0].pur_note));
-
-ctx.apiWithdrawOption(staff.token, o3.option_id);
-d2 = ctx.apiGetRequest(r2.token);
-check('ถอนตัวเลือกแล้วกลับไปรอเสนอราคา', d2.items[0].options.length === 0 && d2.items[0].stage === 'NEED_OPTION', d2.items[0].stage);
-
-d2 = ctx.apiChooseMode(r2.token, it3, 'LOCAL', { by: 'ช่างนพดล ศรีสุข', local_est_price: 1290, local_store: 'Global House', tax_invoice_ok: true });
-let notApproved = null;
-try { ctx.apiSetPurchaseStatus(staff.token, it3, 'ORDERED', '', ''); } catch (e) { notApproved = e.message; }
-check('ยังไม่อนุมัติ บันทึกว่าสั่งซื้อแล้วไม่ได้', /ต้องอนุมัติก่อน/.test(notApproved || ''), notApproved);
-
-ctx.apiApprove(staff.token, it3, false, 'งบปีนี้เต็มแล้ว ให้รอไตรมาสหน้า', '');
-d2 = ctx.apiGetRequest(r2.token);
-check('ไม่อนุมัติ -> สถานะไม่อนุมัติ', d2.items[0].stage === 'PUR_REJECTED', d2.items[0].stage);
-check('เก็บเหตุผลที่ไม่อนุมัติ', /งบปีนี้เต็ม/.test(d2.items[0].approval_note));
-let twice = null;
-try { ctx.apiApprove(staff.token, it3, true, '', ''); } catch (e) { twice = e.message; }
-check('อนุมัติซ้ำไม่ได้', /รออนุมัติ/.test(twice || ''), twice);
-let afterApprove = null;
-try { ctx.apiAddOption(staff.token, it1, { brand: 'x', supplier: 'y', unit_price: 1 }); } catch (e) { afterApprove = e.message; }
-check('ปิดงานแล้วเพิ่มตัวเลือกไม่ได้', /อนุมัติ\/ปิดงานแล้ว/.test(afterApprove || ''), afterApprove);
-let badToken = null;
-try { ctx.apiGetRequest('0000000000000000'); } catch (e) { badToken = e.message; }
-check('token มั่วเปิดไม่ได้', /ไม่พบคำขอ/.test(badToken || ''));
-let crossReq = null;
-try { ctx.apiTechDecision(r2.token, it1, 'CONFIRM', { by: 'ช่างนพดล ศรีสุข', option_id: o1.option_id }); } catch (e) { crossReq = e.message; }
-check('ใช้ token ใบหนึ่งไปแก้อีกใบไม่ได้', /ไม่พบรายการ/.test(crossReq || ''), crossReq);
-let badFile = null;
-try { ctx.saveUpload_({ name: 'x.exe', mime: 'application/x-msdownload', dataB64: tinyJpgB64 }, 'x'); } catch (e) { badFile = e.message; }
-check('อัปโหลดไฟล์นอกเหนือรูป/PDF ไม่ได้', /รูปภาพและไฟล์ PDF/.test(badFile || ''));
-check('ข้อมูลในชีต Items ครบทุกคอลัมน์',
-  ctx.readAll_('Items')[0] && Object.keys(ctx.readAll_('Items')[0]).length === ctx.HEADERS.Items.length + 1,
-  Object.keys(ctx.readAll_('Items')[0] || {}).length + ' vs ' + (ctx.HEADERS.Items.length + 1));
-
-section('9) ข้อมูลรายทูล + หมวดช่างขอแก้ไข');
-const r3 = ctx.apiSubmitRequest({
-  requester_name: 'ช่างวิชัย แก้วมณี', required_date: '2026-11-30',
+section('8) อนุมัติทั้งใบในคลิกเดียว');
+const r2 = ctx.apiSubmitRequest({
+  emp_code: '1078', requester_name: 'ช่างวิชัย แก้วมณี', required_date: '2026-10-01',
   items: [
-    { tool_name: 'ไดอัลเกจ', qty: 1, unit: 'ตัว', required_date: '2026-11-05',
-      intended_use: 'วัดความเยื้องศูนย์เพลา', spec_pref: '0-10 มม. ละเอียด 0.01 มม.',
-      brand_pref: 'Mitutoyo 2046A หรือเทียบเท่า', item_note: 'ตัวเดิมเข็มค้าง',
-      benchmark_price: 1650, benchmark_store: 'ร้านฮาร์ดแวร์ในตลาด' },
-    { tool_name: 'ตลับเมตร 5 ม.', qty: 3, unit: 'อัน', intended_use: 'งานวัดทั่วไป' }
+    { tool_name: 'เครื่องเจียร 4 นิ้ว', qty: 1, unit: 'ตัว', bench_price: 1290, bench_store: 'Global House' },
+    { tool_name: 'ตลับเมตร 5 ม.', qty: 3, unit: 'อัน' }
   ]
 });
-const it5 = r3.req_id + '-01', it6 = r3.req_id + '-02';
-let d3 = ctx.apiGetRequest(r3.token);
-check('เก็บวันที่ต้องการใช้รายทูล', d3.items[0].required_date === '2026-11-05', d3.items[0].required_date);
-check('รายการที่ไม่ระบุวันที่ ใช้วันที่ของทั้งใบ', d3.items[1].required_date === '2026-11-30', d3.items[1].required_date);
-check('เก็บยี่ห้อ/รุ่นที่อยากได้แยกจากสเปค',
-  d3.items[0].brand_pref === 'Mitutoyo 2046A หรือเทียบเท่า' && d3.items[0].spec_pref === '0-10 มม. ละเอียด 0.01 มม.',
-  d3.items[0].brand_pref);
-check('เก็บหมายเหตุรายทูล', d3.items[0].item_note === 'ตัวเดิมเข็มค้าง', d3.items[0].item_note);
-check('อีเมลแจ้งจัดซื้อมียี่ห้อที่ช่างอยากได้', /Mitutoyo 2046A/.test(MAIL[MAIL.length - 1].body));
-
-const o5 = ctx.apiAddOption(staff.token, it5, {
-  brand: 'Mitutoyo', model: '2046S', spec: '0-10 มม. อ่าน 0.01 มม.', supplier: 'ไทยทูลส์',
-  unit_price: 1850, vat_rate: 7, shipping: 0, delivery_date: '2026-11-03', payment_terms: 'เครดิต 30 วัน'
+const J1 = r2.req_id + '-01', J2 = r2.req_id + '-02';
+[J1, J2].forEach((id, i) => {
+  ctx.apiSetSpec(staff.token, id, { brand: i ? 'Stanley' : 'Makita', model: i ? 'PowerLock' : 'GA4030' });
+  ctx.apiTechSpecDecision(r2.token, id, 'CONFIRM', { by: 'ช่างวิชัย แก้วมณี' });
+  ['ไทยทูลส์ ซัพพลาย', 'ก.การช่าง', 'เอเซียเครื่องมือ'].forEach((sup, k) => {
+    ctx.apiAddOption(staff.token, id, { supplier: sup, brand: 'X', model: 'Y', unit_price: 1000 + k * 50 + i * 100, vat_rate: 7, shipping: 0 });
+  });
+  const opts = ctx.optionsOfItem_(id);
+  ctx.apiRecommend(staff.token, id, opts[0].option_id, 'ถูกที่สุดและมีของ');
+  ctx.apiSubmitForApproval(staff.token, id);
 });
-const optRow5 = ctx.findOne_('Options', 'option_id', o5.option_id);
-check('เก็บยี่ห้อและรุ่นแยกคอลัมน์', optRow5.brand === 'Mitutoyo' && optRow5.model === '2046S');
-check('ชื่อแสดงผล = ยี่ห้อ + รุ่น', ctx.brandModel_(optRow5) === 'Mitutoyo 2046S', ctx.brandModel_(optRow5));
-let noBrand = null;
-try { ctx.apiAddOption(staff.token, it6, { model: 'X', supplier: 'y', unit_price: 1 }); } catch (e) { noBrand = e.message; }
-check('ไม่ใส่ยี่ห้อเสนอไม่ได้', /ยี่ห้อ/.test(noBrand || ''), noBrand);
+const before = ctx.apiMgrData(mgr.token, {});
+check('ใบที่ 2 รออนุมัติ 2 รายการ',
+  before.groups.filter(x => x.req_id === r2.req_id)[0].approvable === 2);
+const all = ctx.apiMgrApproveAll(mgr.token, r2.req_id, 'อนุมัติทั้งใบ');
+check('กดครั้งเดียวอนุมัติครบ 2 รายการ', all.approved === 2 && all.failed.length === 0, all);
+board = ctx.apiStaffData(staff.token, {});
+check('ทั้งสองรายการรอเปิด PO',
+  board.items.filter(i => i.req_id === r2.req_id).every(i => i.stage === 'TO_PO'));
+check('อนุมัติทั้งใบใช้ตัวที่จัดซื้อแนะนำ',
+  board.items.filter(i => i.item_id === J1)[0].approved_option_id === ctx.optionsOfItem_(J1)[0].option_id);
 
-ctx.apiTechDecision(r3.token, it5, 'CHANGE', { by: 'ช่างวิชัย แก้วมณี', option_id: o5.option_id, note: 'ขอแบบมีขาแม่เหล็กด้วย' });
-d3 = ctx.apiGetRequest(r3.token);
-check('ขอแก้ไข -> หมวด CHANGE_REQ', d3.items[0].stage === 'CHANGE_REQ', d3.items[0].stage);
-const board = ctx.apiStaffData(staff.token, {});
-check('แดชบอร์ดนับหมวดช่างขอแก้ไขแยกจากรอเสนอราคา', board.counts.CHANGE_REQ >= 1 && board.counts.NEED_OPTION >= 1,
-  JSON.stringify(board.counts));
-check('หมวดช่างขอแก้ไขมีชื่อไทย/อังกฤษ', /Change requested/.test(board.stageLabels.CHANGE_REQ), board.stageLabels.CHANGE_REQ);
-const onlyChange = ctx.apiStaffData(staff.token, { stage: 'CHANGE_REQ' });
-check('กรองเฉพาะหมวดช่างขอแก้ไขได้', onlyChange.items.every(i => i.stage === 'CHANGE_REQ') && onlyChange.items.length >= 1);
-check('การ์ดจัดซื้อเห็นเหตุผลที่ช่างขอแก้ไข',
-  /ขาแม่เหล็ก/.test((onlyChange.items.filter(i => i.item_id === it5)[0] || {}).tech_note || ''));
+section('9) ประวัติ ค้นหา และกฎอื่น ๆ');
+const hist = ctx.apiItemHistory(staff.token, I1);
+check('ประวัติเก็บครบทุกขั้น', hist.length >= 7, hist.length);
+check('ประวัติมีครบ 3 บทบาท',
+  ['TECH', 'PURCHASING', 'MANAGEMENT'].every(r => hist.some(h => h.role === r)),
+  hist.map(h => h.role));
+check('ประวัติบันทึกคนกดอนุมัติ',
+  hist.some(h => h.action === 'APPROVE' && h.actor === 'คุณสมศักดิ์ (ผู้จัดการ)'));
+check('ผู้บริหารเปิดประวัติได้ด้วย', ctx.apiItemHistory(mgr.token, I1).length === hist.length);
+
+const techHist = ctx.apiGetRequest(res.token).items[0].history;
+const techHistText = JSON.stringify(techHist);
+check('ประวัติฝั่งช่างไม่มีชื่อผู้ขายหลุดออกไป',
+  !/ไทยทูลส์|ก\.การช่าง/.test(techHistText), (techHistText.match(/ไทยทูลส์[^"]*/g) || [])[0]);
+check('ประวัติฝั่งช่างไม่มีราคาผู้ขายหลุดออกไป',
+  !/1,979|1,918|1,850|1,790/.test(techHistText), (techHistText.match(/[\d,]+\.\d\d บาท/g) || []));
+check('ประวัติฝั่งช่างยังบอกเหตุการณ์สำคัญเป็นภาษาไทย',
+  techHist.some(h => h.action === 'ผู้บริหารอนุมัติ') && techHist.some(h => h.action === 'ช่างยืนยันสเปค'),
+  techHist.map(h => h.action));
+check('ประวัติฝั่งช่างยังเห็นรายละเอียดของตัวเอง',
+  techHist.some(h => h.action === 'ช่างแจ้งราคาที่ร้าน' && /1,650/.test(h.detail)) ||
+  techHist.some(h => h.action === 'ช่างส่งคำขอ' && /1,650/.test(h.detail)),
+  techHist.filter(h => /ช่าง/.test(h.action)).map(h => h.action + ':' + h.detail));
+
+check('ค้นหาด้วยรหัสพนักงานได้', ctx.apiFindMyRequests('1042').length === 1);
+check('ค้นหาด้วยชื่อได้', ctx.apiFindMyRequests('วิชัย').length === 1);
+check('ค้นหาบนแดชบอร์ดด้วยรหัสพนักงานได้',
+  ctx.apiStaffData(staff.token, { q: '1078' }).items.length === 2);
+
+check('ไม่อนุมัติต้องมีเหตุผล', /เหตุผล/.test(err(() => ctx.apiMgrReject(mgr.token, J1, '')) || ''));
+check('token มั่วเปิดไม่ได้', /ไม่พบคำขอ/.test(err(() => ctx.apiGetRequest('0000000000000000')) || ''));
+check('ใช้ token ใบหนึ่งไปแก้อีกใบไม่ได้',
+  /ไม่พบรายการ/.test(err(() => ctx.apiTechSpecDecision(r2.token, I1, 'CONFIRM', { by: 'ช่างวิชัย แก้วมณี' })) || ''));
+check('อัปโหลดไฟล์นอกเหนือรูป/PDF ไม่ได้',
+  /รูปภาพและไฟล์ PDF/.test(err(() => ctx.saveUpload_({ name: 'x.exe', mime: 'application/x-msdownload', dataB64: tinyJpgB64 }, 'x')) || ''));
+check('ค่าส่งถูกคิด VAT ด้วย', Math.abs(ctx.priceCalc_(1000, 2, 7, 200).total - 2354) < 0.01, ctx.priceCalc_(1000, 2, 7, 200));
+check('ข้อมูลในชีต Items ครบทุกคอลัมน์',
+  ctx.readAll_('Items')[0] && Object.keys(ctx.readAll_('Items')[0]).length === ctx.HEADERS.Items.length + 1);
+
+section('10) สรุปงานค้างรายวัน');
+const before2 = MAIL.length;
+ctx.dailyDigest();
+check('ส่งสรุปให้จัดซื้อ', MAIL.slice(before2).some(m => /สรุปงานค้าง/.test(m.subject)));
+const pend = ctx.apiMgrData(mgr.token, {}).counts.APPROVAL || 0;
+check('ไม่มีรายการค้างอนุมัติแล้ว ไม่ต้องส่งเมลผู้บริหาร',
+  pend === 0 && !MAIL.slice(before2).some(m => /^รออนุมัติ/.test(m.subject)), pend);
 
 console.log('\n----------------------------------------');
 console.log('ผ่าน ' + pass + ' / ล้มเหลว ' + fail);

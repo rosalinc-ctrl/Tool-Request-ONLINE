@@ -7,7 +7,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('🔧 Meiwa Tool Request')
     .addItem('1) ติดตั้งระบบ (Setup sheets)', 'menuSetup')
-    .addItem('2) แสดงลิงก์เว็บแอป (Web app URL)', 'menuShowUrl')
+    .addItem('2) แสดงลิงก์เว็บแอปทั้ง 3 หน้า', 'menuShowUrl')
     .addItem('3) ติดตั้งแจ้งเตือนรายวัน (Daily digest)', 'menuInstallTrigger')
     .addSeparator()
     .addItem('สร้างข้อมูลทดสอบ (Demo data)', 'menuDemoData')
@@ -19,8 +19,9 @@ function menuSetup() {
   SpreadsheetApp.getUi().alert(
     'ติดตั้งเรียบร้อย\n\n' +
     'ขั้นต่อไป:\n' +
-    '1. แก้ชีต Config: STAFF_PIN, PURCHASING_EMAILS และข้อมูลบริษัทสำหรับใบกำกับภาษี\n' +
-    '2. ใส่รายชื่อช่างในชีต Technicians\n' +
+    '1. แก้ชีต Config: STAFF_PIN, MGR_PIN, PURCHASING_EMAILS, MANAGEMENT_EMAILS\n' +
+    '   และข้อมูลบริษัทสำหรับใบกำกับภาษี (COMPANY_*)\n' +
+    '2. ใส่รหัสพนักงานและรายชื่อช่างในชีต Technicians\n' +
     '3. Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone)'
   );
 }
@@ -32,8 +33,9 @@ function menuShowUrl() {
     return;
   }
   SpreadsheetApp.getUi().alert(
-    'ลิงก์สำหรับช่าง (ส่งทาง LINE):\n' + u + '\n\n' +
-    'หน้าจัดซื้อ:\n' + u + '?p=dash'
+    'ฟอร์มขอซื้อ (ส่งช่างทาง LINE):\n' + u + '\n\n' +
+    'หน้าจัดซื้อ:\n' + u + '?p=dash\n\n' +
+    'หน้าผู้บริหารอนุมัติ:\n' + u + '?p=mgr'
   );
 }
 
@@ -54,7 +56,6 @@ function setupAll() {
   seedTechs_();
   rootFolder_();
 
-  // ลบชีตเปล่าเริ่มต้นของ Google
   var s1 = ss.getSheetByName('Sheet1') || ss.getSheetByName('แผ่น1');
   if (s1 && s1.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(s1);
 
@@ -67,7 +68,7 @@ function ensureSheet_(name) {
   var sh = ss.getSheetByName(name);
   if (!sh) sh = ss.insertSheet(name);
   var headers = HEADERS[name];
-  // ชีตใหม่ของ Google มี 26 คอลัมน์ แต่ชีต Items ต้องใช้ 30 -> ขยายก่อนเขียนหัวตาราง
+  // ชีตใหม่ของ Google มี 26 คอลัมน์ แต่ชีต Items ใช้มากกว่านั้น -> ขยายก่อนเขียนหัวตาราง
   if (sh.getMaxColumns() < headers.length) {
     sh.insertColumnsAfter(sh.getMaxColumns(), headers.length - sh.getMaxColumns());
   }
@@ -95,15 +96,16 @@ function seedTechs_() {
   if (readAll_(SHEET.TECHS).length) return;
   var sh = sh_(SHEET.TECHS);
   [
-    ['ช่างสมชาย ใจดี', 'ช่างชาย', 'โรงงาน 1', '', 'Y'],
-    ['ช่างวิชัย แก้วมณี', 'ช่างวิ', 'โรงงาน 1', '', 'Y'],
-    ['ช่างนพดล ศรีสุข', 'ช่างนพ', 'โรงงาน 2', '', 'Y']
+    ['1042', 'ช่างสมชาย ใจดี', 'ช่างชาย', 'โรงงาน 1', '', 'Y'],
+    ['1078', 'ช่างวิชัย แก้วมณี', 'ช่างวิ', 'โรงงาน 1', '', 'Y'],
+    ['1103', 'ช่างนพดล ศรีสุข', 'ช่างนพ', 'โรงงาน 2', '', 'Y']
   ].forEach(function (r) { sh.appendRow(r); });
 }
 
-/** ข้อมูลทดสอบ 1 ใบ 2 รายการ */
+/** ข้อมูลทดสอบ 1 ใบ 2 รายการ พร้อมราคาที่ช่างไปดูมาจากร้านข้างนอก */
 function menuDemoData() {
   var res = apiSubmitRequest({
+    emp_code: '1042',
     requester_name: 'ช่างสมชาย ใจดี',
     site: 'โรงงาน 1',
     contact: 'LINE: somchai.tech',
@@ -111,25 +113,25 @@ function menuDemoData() {
     note: 'ข้อมูลทดสอบระบบ',
     items: [
       {
-        tool_name: 'สว่านโรตารี่ 26 มม.', qty: 1, unit: 'ตัว',
-        intended_use: 'เจาะปูนติดตั้งแป้นเครื่องจักร ไลน์ 3',
-        spec_pref: 'SDS-Plus, 800W ขึ้นไป, แรงกระแทก 2.5J ขึ้นไป',
-        brand_pref: 'Bosch GBH 2-26 หรือ Makita เทียบเท่า',
-        item_note: 'ตัวเดิมหัวจับหลวม ใช้ไม่ได้แล้ว',
-        benchmark_price: 4890, benchmark_store: 'Global House (โกลบอลเฮ้าส์)',
-        ref_links: ''
+        tool_name: 'ไดอัลเกจ / Dial Gauge', qty: 1, unit: 'ตัว',
+        intended_use: 'วัดความเยื้องศูนย์เพลามอเตอร์ ไลน์ 3',
+        spec_pref: 'ช่วงวัด 0–10 มม. ความละเอียด 0.01 มม. พร้อมขาแม่เหล็ก',
+        brand_pref: 'Mitutoyo 2046A หรือเทียบเท่า',
+        item_note: 'ตัวเดิมเข็มค้าง อ่านค่าไม่ได้',
+        bench_price: 1650, bench_store: 'Global House (โกลบอลเฮ้าส์)',
+        bench_note: 'เห็นที่ชั้นวางเครื่องมือวัด ซื้อได้เลยวันนี้'
       },
       {
         tool_name: 'ประแจทอร์ค 1/2 นิ้ว', qty: 2, unit: 'ตัว',
-        required_date: Utilities.formatDate(new Date(Date.now() + 14 * 86400000), tz_(), 'yyyy-MM-dd'),
         intended_use: 'ขันโบลต์หน้าแปลนตามค่าทอร์ค',
-        spec_pref: '40-200 N·m มีใบรับรองการสอบเทียบ',
-        brand_pref: '',
-        item_note: 'ใช้คู่กับงาน PM เดือนหน้า',
-        benchmark_price: 2150, benchmark_store: 'Global House (โกลบอลเฮ้าส์)',
-        ref_links: ''
+        spec_pref: '40–200 N·m มีใบรับรองการสอบเทียบ',
+        item_note: 'ใช้คู่กับงาน PM เดือนหน้า'
       }
     ]
   });
-  SpreadsheetApp.getUi().alert('สร้างใบทดสอบ ' + res.req_id + '\n\nลิงก์สำหรับช่าง:\n' + res.url);
+  SpreadsheetApp.getUi().alert(
+    'สร้างใบทดสอบ ' + res.req_id + '\n\n' +
+    'ลิงก์สำหรับช่าง:\n' + res.url + '\n\n' +
+    'ขั้นต่อไป: เปิดหน้าจัดซื้อ (?p=dash) แล้วกด "ส่งสเปคให้ช่างตรวจ"'
+  );
 }
